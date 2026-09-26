@@ -39,6 +39,16 @@ cd "$PROJECT_DIR"
 echo "==> 项目目录: $PROJECT_DIR"
 
 # ---------- 1. 环境 ----------
+# 非交互 SSH 里 conda 通常不在 PATH（只在 .bashrc 里初始化），先常见路径补一下
+if ! command -v conda >/dev/null 2>&1; then
+    for d in /root/miniconda3 /opt/conda "$HOME/miniconda3" "$HOME/anaconda3"; do
+        if [[ -x "$d/bin/conda" ]]; then
+            export PATH="$d/bin:$PATH"
+            break
+        fi
+    done
+fi
+
 if ! command -v conda >/dev/null 2>&1; then
     echo "!! 没找到 conda。先装 miniconda，或改用镜像自带的 python。"
     exit 1
