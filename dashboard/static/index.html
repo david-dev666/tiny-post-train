@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tiny-post-train 训练看板</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --line: #262c35;
+    --fg: #e6e9ee;
+    --muted: #838d9b;
+    --ok: #3ecf8e;
+    --warn: #e3b341;
+    --bad: #f0616d;
+    --accent: #4c8dff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  h1 span { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 13px; }
+  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  select {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px; min-width: 180px;
+  }
+  label { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .stamp { color: var(--muted); font-size: 12px; }
+
+  .cards {
+    display: grid; gap: 12px; padding: 16px 20px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .card .k { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .card .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .s { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .card .v.ok { color: var(--ok); }
+  .card .v.warn { color: var(--warn); }
+  .card .v.bad { color: var(--bad); }
+
+  .charts { display: grid; gap: 12px; padding: 0 20px 28px; grid-template-columns: 1fr; }
+  @media (min-width: 1100px) { .charts { grid-template-columns: 1fr 1fr; } }
+  .chart {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 8px 4px;
+  }
+  .chart h2 {
+    font-size: 13px; font-weight: 500; color: var(--muted);
+    margin: 4px 12px 0;
+  }
+  .chart .plot { height: 300px; width: 100%; }
+
+  .notice {
+    margin: 16px 20px; padding: 12px 16px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+  }
+  .notice.bad { border-color: var(--bad); color: var(--bad); }
+  code { background: #0b0e12; padding: 2px 6px; border-radius: 4px; color: var(--accent); }
+
+  .panels { display: grid; gap: 12px; padding: 0 20px 12px; grid-template-columns: 1fr; }
+  @media (min-width: 1100px) { .panels { grid-template-columns: 360px 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; min-width: 0;
+  }
+  .panel h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0 0 12px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 9px 14px; font-size: 13px; margin: 0; }
+  .kv dt { color: var(--muted); white-space: nowrap; }
+  .kv dd {
+    margin: 0; text-align: right; word-break: break-all;
+    font-variant-numeric: tabular-nums;
+  }
+  .samples { display: grid; gap: 10px; }
+  .sample {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 13px; background: #131720;
+  }
+  .sample .role {
+    color: var(--muted); font-size: 11px; letter-spacing: .5px;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  .sample .txt {
+    margin: 0; white-space: pre-wrap; word-break: break-word;
+    max-height: 120px; overflow: auto;
+  }
+  .sample .txt.out { color: var(--ok); }
+  .sample .txt + .role { margin-top: 10px; }
+  .empty { color: var(--muted); font-size: 13px; }
+
+  .stats { padding: 4px 20px 0; color: var(--muted); font-size: 13px; }
+  .stats b { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+  .sample .txt.dim { color: var(--muted); }
+  .sample .meta-line { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .span-all { grid-column: 1 / -1; }
+
+  .probe-metrics { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .pill {
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 1px 9px; font-size: 11px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pill.warn { border-color: var(--warn); color: var(--warn); }
+  .pill.bad { border-color: var(--bad); color: var(--bad); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>tiny-post-train<span id="gpuName"></span></h1>
+  <div class="controls">
+    <select id="runSel"></select>
+    <label><input type="checkbox" id="autoRefresh" checked> 自动刷新</label>
+    <span class="stamp" id="stamp">—</span>
+  </div>
+</header>
+
+<section class="cards" id="cards"></section>
+
+<section class="panels">
+  <div class="panel">
+    <h2>本次训练配置</h2>
+    <dl class="kv" id="meta"><dd class="empty">加载中…</dd></dl>
+  </div>
+  <div class="panel">
+    <h2>训练数据抽样</h2>
+    <div class="samples" id="samples"><div class="empty">加载中…</div></div>
+  </div>
+</section>
+
+<section class="panels">
+  <div class="panel span-all">
+    <h2>最新推理表现（训练中每 N 步采样一次）</h2>
+    <div class="samples" id="probes"><div class="empty">加载中…</div></div>
+  </div>
+</section>
+
+<div class="stats" id="stats"></div>
+
+<section class="charts">
+  <div class="chart"><h2>loss</h2><div class="plot" id="plotLoss"></div></div>
+  <div class="chart"><h2>learning rate</h2><div class="plot" id="plotLr"></div></div>
+  <div class="chart">
+    <h2>perplexity · 验证集拟合度（越低越贴合验证集，<b>不等于</b>回答质量更好）</h2>
+    <div class="plot" id="plotPpl"></div>
+  </div>
+  <div class="chart">
+    <h2>MMLU 子集准确率（固定题目，虚线是随机基准 25%）</h2>
+    <div class="plot" id="plotBench"></div>
+  </div>
+</section>
+
+<div id="notice" class="notice" style="display:none"></div>
+
+<script>
+const CDNS = [
+  "https://cdn.bootcdn.net/ajax/libs/echarts/5.5.1/echarts.min.js",
+  "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js",
+  "https://unpkg.com/echarts@5.5.1/dist/echarts.min.js",
+];
+
+const state = {
+  run: null,
+  offset: 0,
+  records: [],
+  bench: [],
+  meta: {},
+  charts: { loss: null, lr: null, ppl: null, bench: null },
+  timer: null,
+  busy: false,
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* token：用 ?token=xxx 打开一次，之后从 localStorage 取，别再暴露在地址栏 */
+const TOKEN =
+  new URLSearchParams(location.search).get("token") ||
+  localStorage.getItem("tpt_token") ||
+  "";
+if (TOKEN) { try { localStorage.setItem("tpt_token", TOKEN); } catch (e) {} }
+
+function notice(text, bad) {
+  const el = $("notice");
+  if (!text) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.className = bad ? "notice bad" : "notice";
+  el.innerHTML = text;
+}
+
+async function getJSON(url) {
+  let res;
+  try {
+    res = await fetch(url, {
+      cache: "no-store",
+      headers: TOKEN ? { "X-Token": TOKEN } : {},
+    });
+  } catch (e) {
+    // fetch 抛 TypeError 说明压根没连上，不是 HTTP 层面的错误
+    throw new Error("OFFLINE");
+  }
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+function fmtDuration(sec) {
+  if (sec == null || !isFinite(sec) || sec < 0) return "—";
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function card(k, v, sub, cls) {
+  return `<div class="card"><div class="k">${k}</div>
+          <div class="v ${cls || ""}">${v}</div>
+          <div class="s">${sub || ""}</div></div>`;
+}
+
+/* ------------------------------------------------------------ 状态卡片 */
+
+function renderCards(gpu, trainer) {
+  const cards = [];
+  const last = state.records[state.records.length - 1] || {};
+  const meta = state.meta || {};
+
+  // 训练进程
+  if (trainer && trainer.alive) {
+    cards.push(card("训练进程", "运行中", "train_sft.py 存活", "ok"));
+  } else {
+    cards.push(card("训练进程", "未运行", "没检测到 train_sft.py", "warn"));
+  }
+
+  // 步数
+  const step = last.step;
+  const maxSteps = meta.max_steps;
+  cards.push(card(
+    "步数",
+    step == null ? "—" : `${step}`,
+    maxSteps ? `共 ${maxSteps} 步` : "未知总步数"
+  ));
+
+  // ETA
+  let etaText = "—", etaSub = "等待数据";
+  if (step > 0 && maxSteps > 0 && meta.started_at) {
+    const elapsed = Date.now() / 1000 - meta.started_at;
+    if (step >= maxSteps) {
+      etaText = "已完成";
+      etaSub = `耗时 ${fmtDuration(elapsed)}`;
+    } else {
+      const remain = elapsed * (maxSteps - step) / step;
+      etaText = fmtDuration(remain);
+      etaSub = `已用 ${fmtDuration(elapsed)}`;
+    }
+  }
+  cards.push(card("预计剩余", etaText, etaSub));
+
+  // loss
+  cards.push(card(
+    "loss",
+    last.loss == null ? "—" : Number(last.loss).toFixed(4),
+    last.epoch == null ? "" : `epoch ${Number(last.epoch).toFixed(3)}`
+  ));
+
+  // lr
+  const lr = last.learning_rate;
+  cards.push(card("learning rate", lr == null ? "—" : Number(lr).toExponential(2), ""));
+
+  // GPU
+  if (gpu && gpu.available && gpu.gpus.length) {
+    const g = gpu.gpus[0];
+    const utilCls = g.util >= 80 ? "ok" : (g.util >= 20 ? "warn" : "bad");
+    cards.push(card("GPU 利用率", `${g.util}%`, g.name, utilCls));
+    const pct = g.mem_total ? (g.mem_used / g.mem_total) * 100 : 0;
+    cards.push(card(
+      "显存",
+      `${(g.mem_used / 1024).toFixed(1)} / ${(g.mem_total / 1024).toFixed(0)} GB`,
+      `${pct.toFixed(0)}%　${g.temp}°C　${g.power}W`,
+      pct >= 90 ? "bad" : ""
+    ));
+  } else {
+    cards.push(card("GPU", "不可用", "无卡模式 / nvidia-smi 失败", "warn"));
+  }
+
+  $("cards").innerHTML = cards.join("");
+  $("gpuName").textContent = (gpu && gpu.available && gpu.gpus.length) ? gpu.gpus[0].name : "";
+}
+
+/* ------------------------------------------------------------ 图表 */
+
+const AXIS = {
+  axisLine: { lineStyle: { color: "#3a424e" } },
+  splitLine: { lineStyle: { color: "#20252c" } },
+  axisLabel: { color: "#838d9b" },
+};
+
+function baseOption(name) {
+  return {
+    animation: false,
+    grid: { left: 62, right: 18, top: 16, bottom: 34 },
+    tooltip: {
+      trigger: "axis",
+      backgroundColor: "#1b2028",
+      borderColor: "#2c333d",
+      textStyle: { color: "#e6e9ee", fontSize: 12 },
+    },
+    xAxis: { type: "value", name: "step", nameTextStyle: { color: "#838d9b" }, min: "dataMin", ...AXIS },
+    yAxis: { type: "value", scale: true, ...AXIS },
+    series: [],
+  };
+}
+
+function makeLine(name, color, data) {
+  return {
+    name,
+    type: "line",
+    showSymbol: false,
+    smooth: false,
+    lineStyle: { width: 1.6, color },
+    itemStyle: { color },
+    data,
+  };
+}
+
+/* MMLU 子集曲线：额外画一条 25% 的随机基准虚线，不然看不出「有没有在学」 */
+function benchSeries(data) {
+  return [
+    {
+      ...makeLine("MMLU 子集", "#f0a35e", data),
+      markLine: {
+        silent: true,
+        symbol: "none",
+        lineStyle: { color: "#f0616d", type: "dashed", width: 1 },
+        label: { formatter: "随机 25%", color: "#f0616d", fontSize: 11 },
+        data: [{ yAxis: 25 }],
+      },
+    },
+  ];
+}
+
+function renderCharts() {
+  const recs = state.records;
+
+  const lossData = [];
+  const evalData = [];
+  const lrData = [];
+  const pplData = [];
+  for (const r of recs) {
+    if (typeof r.loss === "number") lossData.push([r.step, r.loss]);
+    if (typeof r.eval_loss === "number") evalData.push([r.step, r.eval_loss]);
+    if (typeof r.learning_rate === "number") lrData.push([r.step, r.learning_rate]);
+    if (typeof r.perplexity === "number") pplData.push([r.step, r.perplexity]);
+  }
+
+  const lossSeries = [];
+  if (lossData.length) lossSeries.push(makeLine("train loss", "#4c8dff", lossData));
+  if (evalData.length) lossSeries.push(makeLine("eval loss", "#e3b341", evalData));
+
+  if (!state.charts.loss && (lossData.length || evalData.length)) {
+    state.charts.loss = echarts.init($("plotLoss"), null, { renderer: "canvas" });
+    state.charts.loss.setOption({ ...baseOption(), series: lossSeries });
+  } else if (state.charts.loss) {
+    state.charts.loss.setOption({ series: lossSeries });
+  }
+
+  const lrSeries = lrData.length ? [makeLine("lr", "#3ecf8e", lrData)] : [];
+  if (state.charts.lr) {
+    state.charts.lr.setOption({ series: lrSeries });
+  } else if (lrData.length) {
+    state.charts.lr = echarts.init($("plotLr"), null, { renderer: "canvas" });
+    state.charts.lr.setOption({ ...baseOption(), series: lrSeries });
+  }
+
+  const pplSeries = pplData.length ? [makeLine("perplexity", "#c58af9", pplData)] : [];
+  if (!state.charts.ppl && pplData.length) {
+    state.charts.ppl = echarts.init($("plotPpl"), null, { renderer: "canvas" });
+    state.charts.ppl.setOption({ ...baseOption(), series: pplSeries });
+  } else if (state.charts.ppl) {
+    state.charts.ppl.setOption({ series: pplSeries });
+  }
+
+  const benchData = state.bench
+    .filter((r) => typeof r.accuracy === "number")
+    .map((r) => [r.step, +(r.accuracy * 100).toFixed(1)]);
+  if (!state.charts.bench && benchData.length) {
+    state.charts.bench = echarts.init($("plotBench"), null, { renderer: "canvas" });
+    state.charts.bench.setOption({
+      ...baseOption(),
+      yAxis: {
+        type: "value", scale: true, name: "%",
+        nameTextStyle: { color: "#838d9b" }, ...AXIS,
+      },
+      series: benchSeries(benchData),
+    });
+  } else if (state.charts.bench) {
+    state.charts.bench.setOption({ series: benchSeries(benchData) });
+  }
+}
+
+/* ------------------------------------------------------------ 配置 / 抽样 / 表现 */
+
+const META_LABELS = {
+  model: "基座模型",
+  data: "训练数据",
+  max_steps: "总步数",
+  num_train_epochs: "轮数",
+  batch_size: "batch size",
+  grad_accum: "梯度累积",
+  learning_rate: "学习率",
+  max_seq_len: "max seq len",
+  lora_r: "LoRA r",
+  load_in_4bit: "4bit 加载",
+  started_at: "开始时间",
+};
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function renderMeta() {
+  const meta = state.meta || {};
+  const rows = [];
+  for (const [key, label] of Object.entries(META_LABELS)) {
+    let v = meta[key];
+    if (v === undefined || v === null) continue;
+    if (key === "started_at") v = new Date(v * 1000).toLocaleString("zh-CN");
+    if (key === "load_in_4bit") v = v ? "是" : "否";
+    rows.push(`<dt>${label}</dt><dd>${esc(v)}</dd>`);
+  }
+  $("meta").innerHTML = rows.length
+    ? rows.join("")
+    : `<dt>状态</dt><dd class="empty">还没有 run_meta.json</dd>`;
+}
+
+let samplesLoadedFor = null;
+
+async function loadSamples(force) {
+  if (!state.run) {
+    $("samples").innerHTML =
+      `<div class="empty">还没有训练记录。跑一次训练后，这里会显示真实喂进去的样本。</div>`;
+    return;
+  }
+  if (!force && samplesLoadedFor === state.run) return;
+  samplesLoadedFor = state.run;
+  try {
+    const data = await getJSON(`/api/samples?run=${encodeURIComponent(state.run)}&n=3`);
+    const head = `<div class="empty" style="margin-bottom:8px">
+        ${esc(data.data_ref)} · ${data.size_mb} MB · 抽 ${data.samples.length} 条</div>`;
+    const items = data.samples.map((s, i) => {
+      const q = [s.instruction, s.input].filter(Boolean).join("\n").trim() || "(空)";
+      const a = String(s.output || "").trim() || "(空)";
+      return `<div class="sample">
+        <div class="role">#${i + 1} question</div><div class="txt">${esc(q)}</div>
+        <div class="role">answer</div><div class="txt out">${esc(a)}</div>
+      </div>`;
+    });
+    $("samples").innerHTML = head + (items.join("") || `<div class="empty">数据集是空的</div>`);
+  } catch (err) {
+    $("samples").innerHTML = `<div class="empty">抽样失败：${esc(err.message)}</div>`;
+    samplesLoadedFor = null;
+  }
+}
+
+/* 采样结果的客观指标。没有参考答案，所以只显示「退化信号」，不做质量打分。 */
+function probePills(rec) {
+  if (!rec) return "";
+  const pills = [];
+  if (typeof rec.tokens === "number") {
+    pills.push(`<span class="pill">${rec.tokens} tokens</span>`);
+  }
+  if (typeof rec.repeat_2gram === "number") {
+    const pct = rec.repeat_2gram * 100;
+    const cls = pct >= 30 ? "bad" : (pct >= 15 ? "warn" : "");
+    pills.push(`<span class="pill ${cls}">复读 ${pct.toFixed(1)}%</span>`);
+  }
+  if (typeof rec.distinct_ratio === "number") {
+    pills.push(`<span class="pill">词面多样 ${(rec.distinct_ratio * 100).toFixed(0)}%</span>`);
+  }
+  return pills.length ? `<div class="probe-metrics">${pills.join("")}</div>` : "";
+}
+
+async function loadProbes() {
+  if (!state.run) {
+    $("probes").innerHTML = `<div class="empty">还没有训练记录。</div>`;
+    return;
+  }
+  try {
+    const data = await getJSON(`/api/probes?run=${encodeURIComponent(state.run)}`);
+    if (!data.total) {
+      $("probes").innerHTML =
+        `<div class="empty">这次训练没有采样。加上 <code>--probe-every 50</code> 再跑，` +
+        `每 50 步会用固定问题问一次当前模型。</div>`;
+      return;
+    }
+    $("probes").innerHTML = data.latest
+      .map((item) => {
+        const cur = item.current || {};
+        const prev = item.previous;
+        const prevBlock = prev
+          ? `<div class="role" style="margin-top:10px">上一次 · step ${prev.step}</div>
+             <div class="txt dim">${esc(prev.output) || "(空)"}</div>
+             ${probePills(prev)}`
+          : "";
+        return `<div class="sample">
+          <div class="role">${esc(item.prompt)} · 已采样 ${item.count} 次</div>
+          <div class="txt">${esc(cur.output) || "(空)"}</div>
+          <div class="meta-line">最新 step ${cur.step} · 生成耗时 ${cur.sec}s</div>
+          ${probePills(cur)}
+          ${prevBlock}
+        </div>`;
+      })
+      .join("");
+  } catch (err) {
+    $("probes").innerHTML = `<div class="empty">读取采样失败：${esc(err.message)}</div>`;
+  }
+}
+
+function renderStats() {
+  const losses = state.records.filter((r) => typeof r.loss === "number");
+  if (!losses.length) { $("stats").innerHTML = ""; return; }
+  const first = losses[0].loss;
+  const last = losses[losses.length - 1].loss;
+  const best = Math.min(...losses.map((r) => r.loss));
+  const tail = losses.slice(-20);
+  const avg = tail.reduce((a, r) => a + r.loss, 0) / tail.length;
+  const drop = first > 0 ? ((first - last) / first) * 100 : 0;
+  const evals = state.records.filter((r) => typeof r.eval_loss === "number");
+  let evalTxt = "";
+  if (evals.length) {
+    const lastEval = evals[evals.length - 1];
+    evalTxt = `　eval loss <b>${lastEval.eval_loss.toFixed(4)}</b>`;
+    if (typeof lastEval.perplexity === "number") {
+      evalTxt += `　perplexity <b>${lastEval.perplexity.toFixed(2)}</b>`;
+    }
+  }
+  const lastBench = state.bench.length ? state.bench[state.bench.length - 1] : null;
+  const benchTxt =
+    lastBench && typeof lastBench.accuracy === "number"
+      ? `　MMLU 子集 <b>${(lastBench.accuracy * 100).toFixed(1)}%</b>` +
+        `（${lastBench.correct}/${lastBench.total}，随机 25%）`
+      : "";
+  $("stats").innerHTML =
+    `loss 当前 <b>${last.toFixed(4)}</b>　最低 <b>${best.toFixed(4)}</b>` +
+    `　最近 ${tail.length} 点均值 <b>${avg.toFixed(4)}</b>` +
+    `　较首点 <b>${drop >= 0 ? "↓" : "↑"}${Math.abs(drop).toFixed(1)}%</b>` +
+    `${evalTxt}${benchTxt}`;
+}
+
+/* ------------------------------------------------------------ 轮询 */
+
+async function refreshRuns() {
+  const data = await getJSON("/api/runs");
+  const sel = $("runSel");
+  const names = data.runs.map((r) => r.name);
+
+  if (!names.length) {
+    notice("outputs/ 下还没有 <code>metrics.jsonl</code>。先跑一次训练，看板就有数据了。");
+    sel.innerHTML = `<option>暂无 run</option>`;
+    return;
+  }
+
+  // run 列表变了才重画，避免打断用户选择
+  const current = Array.from(sel.options).map((o) => o.value).join(",");
+  if (current !== names.join(",")) {
+    sel.innerHTML = names
+      .map((n) => {
+        const r = data.runs.find((x) => x.name === n);
+        const mark = r.active ? " ●" : "";
+        return `<option value="${n}">${n}${mark}</option>`;
+      })
+      .join("");
+  }
+
+  if (!state.run || !names.includes(state.run)) {
+    // 默认选最新的那个
+    const newest = data.runs.slice().sort((a, b) => b.updated_ago - a.updated_ago)[0];
+    state.run = newest.name;
+    state.offset = 0;
+    state.records = [];
+  }
+  sel.value = state.run;
+
+  notice("");
+  document.title = `tiny-post-train · ${state.run}`;
+  $("stamp").textContent = "更新于 " + new Date().toLocaleTimeString();
+}
+
+async function refreshMetrics() {
+  if (!state.run) return;
+  const data = await getJSON(
+    `/api/metrics?run=${encodeURIComponent(state.run)}&offset=${state.offset}`
+  );
+  const bench = data.bench || [];
+  const changed = data.records.length > 0 || bench.length !== state.bench.length;
+  if (data.records.length) {
+    state.records = state.records.concat(data.records);
+    state.offset = data.total;
+  }
+  state.bench = bench;
+  state.meta = data.meta || {};
+  if (changed) renderCharts();
+}
+
+async function refreshStatus() {
+  const data = await getJSON("/api/status");
+  renderCards(data.gpu, data.trainer);
+}
+
+async function tick() {
+  if (state.busy) return;
+  state.busy = true;
+  try {
+    await refreshRuns();
+    await refreshMetrics();
+    await refreshStatus();
+    renderMeta();
+    renderStats();
+    loadSamples(false);
+    loadProbes();
+  } catch (err) {
+    const msg = String(err.message || err);
+    if (msg === "OFFLINE") {
+      notice(
+        "连不上看板服务。服务可能已停止，或者你打开的是本地预览而不是服务器地址。<br>" +
+          "重启服务：<code>bash scripts/start_dashboard.sh</code>",
+        true
+      );
+    } else if (msg.includes("token")) {
+      notice("缺少或错误的 token。在地址后面加上 <code>?token=你的口令</code> 再打开。", true);
+    } else {
+      notice("请求失败：" + msg, true);
+    }
+  } finally {
+    state.busy = false;
+  }
+}
+
+function start() {
+  if (state.timer) clearInterval(state.timer);
+  if ($("autoRefresh").checked) {
+    state.timer = setInterval(tick, 5000);
+  } else {
+    state.timer = null;
+  }
+}
+
+/* ------------------------------------------------------------ 启动 */
+
+function boot() {
+  $("runSel").addEventListener("change", (e) => {
+    state.run = e.target.value;
+    state.offset = 0;
+    state.records = [];
+    state.meta = {};
+    state.bench = [];
+    samplesLoadedFor = null;
+    for (const key of ["loss", "lr", "ppl", "bench"]) {
+      if (state.charts[key]) { state.charts[key].dispose(); state.charts[key] = null; }
+    }
+    tick();
+  });
+  $("autoRefresh").addEventListener("change", start);
+  window.addEventListener("resize", () => {
+    for (const key of ["loss", "lr", "ppl", "bench"]) state.charts[key] && state.charts[key].resize();
+  });
+  tick();
+  start();
+}
+
+// 依次尝试多个 CDN，装不上就提示，避免静默白屏
+(function loadEcharts(i) {
+  if (i >= CDNS.length) {
+    notice("ECharts 加载失败（三个 CDN 都不通）。检查网络，或把 echarts.min.js 放到 dashboard/static/ 下改成本地引用。", true);
+    return;
+  }
+  const s = document.createElement("script");
+  s.src = CDNS[i];
+  s.onload = () => boot();
+  s.onerror = () => loadEcharts(i + 1);
+  document.head.appendChild(s);
+})(0);
+</script>
+</body>
+</html>

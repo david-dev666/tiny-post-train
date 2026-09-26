@@ -16,6 +16,11 @@ huggingface_hub
 # 评测
 lm-eval
 
+# 训练看板
+tensorboard
+fastapi
+uvicorn
+
 # 推理部署
 # 注意：vllm 对 torch 版本的要求和 unsloth 冲突，直接 pip install -r 本文件会打架。
 # 训练阶段先别装它，部署时单独开一个环境。
