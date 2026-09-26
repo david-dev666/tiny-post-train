@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hmac
 import json
 import os
@@ -240,26 +241,76 @@ def get_status():
 _SAMPLE_CACHE: dict = {}
 
 
+# 数据文件格式，按优先级排：真正的数据在前，配置在后
+DATA_EXTENSIONS = ("csv", "jsonl", "json", "parquet")
+METADATA_FILENAMES = {"dataset_infos.json", "dataset_info.json", ".gitattributes"}
+
+
+def _looks_like_metadata(path: Path) -> bool:
+    """跳过随数据集一起下下来的元信息文件。
+
+    alpaca 在 modelscope 上的快照里，真实数据是 train.csv，
+    两个 json 分别是字段 schema 和指向 train.csv 的配置。
+    不排除的话会挑中 116 字节的配置文件，抽样出来是空的。
+    """
+    if path.name in METADATA_FILENAMES or path.name.startswith("README"):
+        return True
+    if path.suffix.lower() != ".json":
+        return False
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            head = json.load(f)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return False
+    if not isinstance(head, dict):
+        return False
+    # 真正的指令数据顶层是数组；顶层是「字典套字典」的基本都是配置
+    values = list(head.values())
+    if not values or not all(isinstance(v, dict) for v in values):
+        return False
+    inner = [item for value in values for item in value.values()]
+    return bool(inner) and all(isinstance(item, dict) for item in inner)
+
+
 def _pick_data_file(path: Path) -> Path | None:
-    """数据可能是一个目录，也可能直接是一个文件。取第一个能用的。"""
+    """数据可能是一个目录，也可能直接是一个文件。取第一个像数据的。"""
     if path.is_file():
         return path
     if path.is_dir():
-        for ext in ("jsonl", "json"):
-            files = sorted(path.glob(f"*.{ext}"))
-            if files:
-                return files[0]
+        for ext in DATA_EXTENSIONS:
+            for candidate in sorted(path.glob(f"*.{ext}")):
+                if not _looks_like_metadata(candidate):
+                    return candidate
     return None
 
 
 def _read_samples(path: Path, n: int) -> list:
     """只读前 n 条，不把整个数据集读进内存。
 
-    jsonl 逐行解析、够数就停；json 是数组，只能整体 parse，所以加了下面的 mtime 缓存。
+    csv 逐行进、jsonl 逐行解析、parquet 只读前 n 行，都是够数就停。
+    只有 json 是数组，必须整体 parse，所以外面加了 mtime 缓存。
     """
-    out: list = []
+    suffix = path.suffix.lower()
+
+    if suffix == ".csv":
+        out = []
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as f:
+            for row in csv.DictReader(f):
+                out.append({key: (value or "").strip() for key, value in row.items()})
+                if len(out) >= n:
+                    break
+        return out
+
+    if suffix == ".parquet":
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            return []
+        return pq.read_table(path).slice(0, n).to_pylist()
+
+    out = []
     with path.open("r", encoding="utf-8", errors="replace") as f:
-        if path.suffix == ".jsonl":
+        if suffix in (".jsonl", ".ndjson"):
             for line in f:
                 line = line.strip()
                 if not line:
@@ -270,14 +321,13 @@ def _read_samples(path: Path, n: int) -> list:
                     continue
                 if len(out) >= n:
                     break
-        else:
-            try:
-                data = json.load(f)
-            except json.JSONDecodeError:
-                return []
-            if isinstance(data, list):
-                out = data[:n]
-    return out
+            return out
+
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return []
+        return data[:n] if isinstance(data, list) else []
 
 
 @app.get("/api/samples")
