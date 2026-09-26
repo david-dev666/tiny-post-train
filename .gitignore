@@ -1,0 +1,35 @@
+# 权重与输出，体积大，不进版本库
+# 注意用 dir/* + !dir/.gitkeep：如果整个目录写 dir/ 被忽略，
+# 里面的 .gitkeep 也无法被重新包含，clone 后目录就不存在。
+weights/*
+!weights/.gitkeep
+outputs/*
+!outputs/.gitkeep
+logs/*
+!logs/.gitkeep
+wandb/
+evals/*.json
+evals/*.log
+
+# 数据
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# 个人记录，只留本地，不进版本库
+notes/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+.ipynb_checkpoints/

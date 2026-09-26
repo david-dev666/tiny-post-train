@@ -1,0 +1,28 @@
+# 训练核心
+# 注意：unsloth 会自行约束 torch / transformers / trl 的匹配版本，
+# 建议先装 unsloth，再装其他的，不要在这里写死 torch 版本。
+unsloth
+trl
+peft
+accelerate
+bitsandbytes
+datasets
+transformers
+
+# 数据与模型下载
+modelscope
+huggingface_hub
+
+# 评测
+lm-eval
+
+# 推理部署
+# 注意：vllm 对 torch 版本的要求和 unsloth 冲突，直接 pip install -r 本文件会打架。
+# 训练阶段先别装它，部署时单独开一个环境。
+# scripts/setup_env.sh 已默认跳过，需要时装的时候用 INSTALL_VLLM=1。
+vllm
+
+# 工具
+wandb
+pyyaml
+tqdm
