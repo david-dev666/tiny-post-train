@@ -17,8 +17,9 @@ data/raw/*
 data/processed/*
 !data/processed/.gitkeep
 
-# 个人记录，只留本地，不进版本库
+# 个人记录与本地 AI 规则，只留本地，不进版本库
 notes/
+.codebuddy/
 
 # Python
 __pycache__/
@@ -33,3 +34,6 @@ venv/
 .idea/
 .DS_Store
 .ipynb_checkpoints/
+
+# 浏览器自动化调试产物（playwright-cli 的快照/日志）
+.playwright-cli/

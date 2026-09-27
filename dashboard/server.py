@@ -146,14 +146,36 @@ def _gpu_info() -> dict:
     return {"available": bool(gpus), "gpus": gpus}
 
 
+def _run_from_cmdline(procs: list[str]) -> str | None:
+    """从 train_sft.py 的命令行里抠出 --output 指向的 run 名。
+
+    看板是「一个 run 一个视图」，但训练进程是整机唯一的。
+    知道进程在写哪个 run，前端才能区分「这个 run 在跑」和「别的 run 在跑」。
+    """
+    def is_python(line: str) -> bool:
+        parts = line.split()
+        return len(parts) > 1 and "python" in parts[1]
+
+    # 真正的 python 进程优先：用 bash -c 包一层启动时，
+    # 包装脚本的命令行里也带着 --output，别从那段脚本文本里误读
+    for line in sorted(procs, key=lambda item: 0 if is_python(item) else 1):
+        parts = line.split()
+        for i, part in enumerate(parts):
+            if part == "--output" and i + 1 < len(parts):
+                return Path(parts[i + 1]).name
+            if part.startswith("--output="):
+                return Path(part.split("=", 1)[1]).name
+    return None
+
+
 def _trainer_processes() -> dict:
-    """看看还有没有在跑的 train_sft.py。"""
+    """看看还有没有在跑的 train_sft.py，以及它在写哪个 run。"""
     try:
         proc = subprocess.run(["pgrep", "-af", "train_sft.py"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.TimeoutExpired):
-        return {"alive": False, "procs": []}
+        return {"alive": False, "procs": [], "run": None}
     procs = [line for line in proc.stdout.strip().splitlines() if line]
-    return {"alive": bool(procs), "procs": procs[:5]}
+    return {"alive": bool(procs), "procs": [p[:200] for p in procs[:5]], "run": _run_from_cmdline(procs)}
 
 
 # ---------------------------------------------------------------- 接口
