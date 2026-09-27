@@ -621,6 +621,7 @@ def main():
             "learning_rate": args.lr,
             "max_seq_len": args.max_seq_len,
             "load_in_4bit": args.load_in_4bit,
+            "train_size": len(dataset),
             "eval_ratio": args.eval_ratio,
             "eval_size": len(eval_dataset) if eval_dataset is not None else 0,
             "eval_steps": args.eval_steps if eval_dataset is not None else 0,
