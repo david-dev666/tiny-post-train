@@ -118,6 +118,13 @@
   }
   .pill.warn { border-color: var(--warn); color: var(--warn); }
   .pill.bad { border-color: var(--bad); color: var(--bad); }
+  /* 头部那个「评测报告 →」入口：做成 pill 是不想为它单独加一套按钮样式 */
+  .pill.link {
+    text-decoration: none; padding: 4px 12px; font-size: 12px;
+    color: var(--accent); border-color: var(--accent);
+    white-space: nowrap;
+  }
+  .pill.link:hover { background: rgba(76, 141, 255, .12); }
 </style>
 </head>
 <body>
@@ -127,6 +134,7 @@
   <div class="controls">
     <select id="runSel"></select>
     <label><input type="checkbox" id="autoRefresh" checked> 自动刷新</label>
+    <a id="reportLink" class="pill link" href="/report" title="模型评测报告（自包含 HTML）">评测报告 →</a>
     <span class="stamp" id="stamp">—</span>
   </div>
 </header>
@@ -195,6 +203,15 @@ const TOKEN =
   localStorage.getItem("tpt_token") ||
   "";
 if (TOKEN) { try { localStorage.setItem("tpt_token", TOKEN); } catch (e) {} }
+
+/* 评测报告入口。普通链接没法带 X-Token 请求头，只能把口令拼在 URL 上 ——
+   这跟上面「别再暴露在地址栏」的原则有点冲突，是有意让步：
+   /report 是个独立的 HTML 页面（不是 fetch 出来的 JSON），做不到只用请求头。
+   口令本来就在同一个浏览器的 localStorage 里，且是同源跳转，不额外扩大暴露面。 */
+const reportLink = $("reportLink");
+if (reportLink) {
+  reportLink.href = "/report" + (TOKEN ? "?token=" + encodeURIComponent(TOKEN) : "");
+}
 
 function notice(text, bad) {
   const el = $("notice");

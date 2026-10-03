@@ -231,8 +231,22 @@ DIAGNOSTIC_SUITES = (
     ("humaneval", "HumanEval（代码）"),
 )
 
-# 截断率超过这个数就报警：说明生成长度给少了，分数被系统性压低
+# 截断率超过这个数就提示。**但「截断」在不同评测项下含义完全不同**，
+# 所以文案分项写 —— 统一说「生成长度给少了」是错的（实测 HumanEval 的截断是
+# 模型写完了函数还在自测，MMLU 更是只要吐一个字母、截断根本无意义）。
+# 详见 docs/01-评测.md 的「被截断在两个评测项里是两件事」。
 TRUNCATION_ALARM = 0.20
+TRUNCATION_MEANING = {
+    "gsm8k": ("生成长度给少了",
+              "答案可能被切在最终数值之前，<b>分数被系统性压低</b>；越啰嗦的模型被压得越狠"),
+    "ifollow": ("输出偏长",
+                "多是模型话多（字数类约束会被撑爆），不一定是长度给少了"),
+    "humaneval": ("函数早写完了",
+                  "模型在继续写自己的示例调用/自测；抽取逻辑会在 <code>print(</code> 处截断，"
+                  "<b>不影响判分</b>"),
+}
+# 只要吐一个字母的项（上限 8 token），「截断」是常态、没有诊断价值 —— 不提示。
+TRUNCATION_SILENT = {"mmlu_gen", "mmlu_gen_plain"}
 
 
 def suite_notes(key: str, slot: dict) -> list[str]:
@@ -277,31 +291,38 @@ def diagnostics_section(results: list[dict]) -> str:
             truncated = slot.get("truncated")
             junk = slot.get("junk_tail")
             notes = suite_notes(key, slot)
+            alarming = False
             if truncated and total and truncated / total >= TRUNCATION_ALARM:
-                notes.append(f"<b>截断率 {truncated / total:.0%}</b>：生成长度给少了")
-            rows.append((data["label"], name, total, truncated, junk, notes))
+                short, why = TRUNCATION_MEANING.get(key, ("截断偏高", "生成长度可能给少了"))
+                if key not in TRUNCATION_SILENT:
+                    notes.append(f"<b>{short} · {truncated / total:.0%}</b>：{why}")
+                    # 只有 GSM8K 的截断会真的压低分数，那里才标红；
+                    # 其余项标红等于把「正常现象」报成事故
+                    alarming = key == "gsm8k"
+            rows.append((data["label"], name, total, truncated, junk, notes, alarming))
 
     if not rows:
         return ""
 
     parts = ["<h2>可信度诊断</h2>",
              '<div class="sub">这些数字不参与判分，但它们决定上面那张表能不能信。'
-             "被截断 = 模型话没说完就被 token 上限切断；乱码尾 = 回合结束前吐了"
-             "一个稀有 token（本项目 SFT 模型的已知缺陷，base / instruct 没有）。</div>",
+             "被截断 = 生成用满了 token 上限（<b>含义随评测项不同</b>，见备注）；"
+             "乱码尾 = 回合结束前吐了一个稀有 token（本项目 SFT 模型的已知缺陷，"
+             "base / instruct 没有）。</div>",
              '<div class="card"><table><thead><tr>'
              "<th>模型</th><th>评测项</th><th>样本</th><th>被截断</th><th>乱码尾</th>"
              "<th>备注</th></tr></thead><tbody>"]
-    for label, name, total, truncated, junk, notes in rows:
-        def cell(value):
+    for label, name, total, truncated, junk, notes, alarming in rows:
+        def cell(value, red=False):
             if value is None:
                 return '<span class="muted">—</span>'
             ratio = value / total if total else 0
-            cls = ' style="color:#cf222e;font-weight:600"' if ratio >= TRUNCATION_ALARM else ""
+            cls = ' style="color:#cf222e;font-weight:600"' if red else ""
             return f"<span{cls}>{value}</span>" + (f'<div class="frac">{ratio:.0%}</div>' if total else "")
         note_html = "；".join(notes) if notes else '<span class="muted">—</span>'
         parts.append(
             f"<tr><td>{html.escape(label)}</td><td>{html.escape(name)}</td>"
-            f'<td class="num">{total}</td><td class="num">{cell(truncated)}</td>'
+            f'<td class="num">{total}</td><td class="num">{cell(truncated, alarming)}</td>'
             f'<td class="num">{cell(junk)}</td><td class="meta">{note_html}</td></tr>'
         )
     parts.append("</tbody></table></div>")
