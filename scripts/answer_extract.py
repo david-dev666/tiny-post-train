@@ -145,35 +145,95 @@ def mmlu_letter(text: str, letters: str = "ABCD") -> tuple[int | None, str]:
 
 
 # ------------------------------------------------------------------ 乱码尾
-
-# 其它文字系统的字符（西里尔 / 希伯来 / 阿拉伯 / 泰文…）。
-# 我们的 SFT 模型会把稀有 token 吐在回合结束之前 —— 实测 ifollow 140/200 条
-# 以 `לחלוט` 结尾、human eval 84/164 条、gsm8k 174/400 条，而 base 和 instruct
-# 一条都没有。这是**模型的真实输出**（token 序列里它就在停止符前面），
-# 不是解码 bug，所以判分时**不偷偷删掉**，而是如实上报比率，
-# 免得它悄悄污染「字数上限」「结尾必须是 X」这类规则却无人察觉。
-OTHER_SCRIPT_RE = re.compile(
-    r"[\u0400-\u04FF\u0530-\u058F\u0590-\u05FF\u0600-\u06FF"
-    r"\u0E00-\u0E7F\uAC00-\uD7AF\u3040-\u30FF]"
+#
+# 「乱码尾」= 模型答完内容之后、回合结束之前吐出的那一个稀有 token。
+#
+# 它是**模型的真实输出**（token 序列里它就在停止符前面），不是解码 bug，
+# 所以判分时**不偷偷删掉**，而是如实上报比率 —— 免得它悄悄污染
+# 「字数上限」「结尾必须是 X」这类规则却无人察觉。
+#
+# 乱码字符分两类：
+#
+# 1. 其它文字系统（西里尔 / 亚美尼亚 / 希伯来 / 阿拉伯 / 泰 / 韩 / 假名）。
+#    实测以希伯来语词 `לחלוט` 为主。已核验评测集（200+1319+40 条）的题面与
+#    规则里**没有任何一条合法要求这些文字的输出**，所以当作乱码不会误报。
+#
+# 2. **U+FFFD 替换字符**。原先漏的就是这一类，导致乱码尾被系统性低估
+#    （GSM8K 实报 65.3%，真实 92.3%；指令遵循实报 75.5%，真实 84.5%）。
+#    成因是字节级 BPE：某个 token 的原始字节形如 `A0 A1 E5 8F 96`，
+#    独立解码时前面两个无效字节变成 `��`、后面 `E5 8F 96` 正常解出 `取`，
+#    于是**整块解成 `��取`**。它在文本层看着像「结尾是个正常汉字」，
+#    因此 `[乱码字符]+$` 这种正则**匹配不到、剪不掉** —— 只能回到 token 层定位。
+_OTHER_SCRIPT_CLASS = (
+    r"\u0400-\u04FF"      # 西里尔
+    r"\u0530-\u058F"      # 亚美尼亚
+    r"\u0590-\u05FF"      # 希伯来
+    r"\u0600-\u06FF"      # 阿拉伯
+    r"\u0E00-\u0E7F"      # 泰文
+    r"\uAC00-\uD7AF"      # 谚文
+    r"\u3040-\u30FF"      # 平假名 / 片假名
 )
+OTHER_SCRIPT_RE = re.compile("[" + _OTHER_SCRIPT_CLASS + "]")
+# 乱码字符全集：其它文字系统 + 替换字符
+JUNK_CHAR_CLASS = _OTHER_SCRIPT_CLASS + r"\ufffd"
+JUNK_CHAR_RE = re.compile("[" + JUNK_CHAR_CLASS + "]")
+JUNK_TAIL_WINDOW = 16
+JUNK_TAIL_RE = re.compile(r"[\s" + JUNK_CHAR_CLASS + r"]+$")
 
 
-def has_other_script(text: str, window: int = 16) -> bool:
-    """末尾一小段里有没有其它文字系统的字符。"""
-    return bool(OTHER_SCRIPT_RE.search((text or "")[-window:]))
+def has_junk_tail(text: str, window: int = JUNK_TAIL_WINDOW) -> bool:
+    """末尾一小段里有没有乱码字符。"""
+    return bool(JUNK_CHAR_RE.search((text or "")[-window:]))
 
 
-JUNK_TAIL_RE = re.compile(
-    r"[\s" + OTHER_SCRIPT_RE.pattern[1:-1] + r"]+$"
-)
+def is_junk_piece(piece: str) -> bool:
+    """一段文本（通常是**单个 token 单独解码**的结果）是不是乱码。"""
+    return bool(JUNK_CHAR_RE.search(piece or ""))
+
+
+def trailing_junk_len(tokenizer, ids, max_scan: int = 4) -> int:
+    """末尾该剪掉几个 token。0 = 干净收尾。
+
+    **这是乱码尾的唯一可靠判据** —— 文本层判不了，原因见上面 U+FFFD 那段：
+    `��取` 解码后以正常汉字收尾，正则剪不掉它。造 DPO 的停止决策偏好数据
+    也靠这个函数，所以**评测口径和训练靶心是同一个定义**，不会各量各的。
+
+    `max_scan` 防止某天吐出一长串乱码时把答案正文也一起吃掉。
+
+    ⚠️ 结果依赖 tokenizer 的切法（同一个字符可能被切成不同数量的 token），
+    所以只在同一个 tokenizer 内部可比。
+    """
+    ids = [int(t) for t in ids]
+    total = len(ids)
+
+    def piece(index: int) -> str:
+        return tokenizer.decode([ids[index]], skip_special_tokens=False)
+
+    # 1) 从尾部跳过纯空白，定位最后一个「有内容」的 token
+    last = total - 1
+    while last >= 0 and not piece(last).strip():
+        last -= 1
+    if last < 0:
+        return 0
+
+    # 2) 从它往回吃掉连续的乱码 token
+    index = last
+    eaten = 0
+    while index >= 0 and eaten < max_scan and is_junk_piece(piece(index)):
+        eaten += 1
+        index -= 1
+
+    # 3) 没乱码就不动；有乱码则「乱码 + 它后面的空白」一起剪
+    return 0 if eaten == 0 else total - index - 1
 
 
 def trim_junk_tail(text: str) -> str:
-    """去掉末尾的乱码 token 与空白。
+    """去掉末尾的乱码与空白（**文本层，只在拿不到 token 时用**）。
 
     **只用于「看看不算乱码会是多少分」的对照，不用于线上判分。**
     线上判分看原始输出 —— 乱码是模型的真实输出，删掉等于掩盖缺陷。
-    但把「含乱码」和「不含乱码」两个数都摆出来，读者才知道这 1~3 个 token
-    到底值多少分（实测 sft-4b-v2 的指令遵循：61.0% → 77.0%，差 16pp）。
+
+    它剪不掉 `��取` 这类「以正常汉字收尾」的乱码，所以给出的对照分是**下界**。
+    能拿到 token 时请用 `trailing_junk_len` 配 `tokenizer.decode(ids[:-n])`。
     """
     return JUNK_TAIL_RE.sub("", (text or "").rstrip())

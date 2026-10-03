@@ -92,9 +92,10 @@ from engines import ENGINES, make_engine  # noqa: E402
 # 正是「多处实现必然漂移」的隐患。
 from answer_extract import (  # noqa: E402
     follows_hash_format,
-    has_other_script,
+    has_junk_tail,
     last_number,
     mmlu_letter,
+    trailing_junk_len,
     trim_junk_tail,
 )
 
@@ -240,6 +241,28 @@ def _progress(label: str):
     return report
 
 
+def _junk_info(tokenizer, ids: list[int], text: str) -> tuple[bool, str, int]:
+    """(末尾有没有乱码, 假设它在最后一个正常 token 处停下会输出什么, 剪掉几个 token)。
+
+    **按 token 判，不按文本判。** 乱码 token 独立解码后可能以正常汉字收尾
+    （字节级 BPE 的残缺片段解成 `\\ufffd\\ufffd取`），文本层的
+    `[乱码字符]+$` 匹配不到它 —— 既会漏报，也剪不干净。详见 answer_extract.py。
+
+    第二项是「去掉乱码再判」的对照输入：**只用于对照，不改判分**
+    （线上看原始输出，乱码是模型的真实输出，删掉等于掩盖缺陷）。
+    它是按 token 重建的，所以是真上界；`answer_extract.trim_junk_tail`
+    那个文本版给出的只是下界。
+
+    拿不到 token 时（理论上不会，两个引擎都回传 ids）退回文本层 —— 宁可低估。
+    """
+    if ids:
+        cut = trailing_junk_len(tokenizer, ids)
+        if cut:
+            return True, tokenizer.decode(ids[:-cut], skip_special_tokens=True).strip(), cut
+        return False, text, 0
+    return has_junk_tail(text), trim_junk_tail(text), 0
+
+
 # ------------------------------------------------------------------ 三套评测
 
 # 生成过程中的异常计数（`stop_token_in_middle` 之类）现在由引擎自己维护：
@@ -263,8 +286,11 @@ def run_ifollow(engine, tokenizer, path: Path, max_new_tokens: int) -> dict:
         passed, detail = check_all(item["rules"], output)
         # 诊断位：被截断 / 尾巴有乱码。都**不参与判分**，但它们是「这条为什么没过」
         # 的常见误判来源 —— 比如答案写对了，却因为尾巴的乱码超出字数上限
+        junk, output_trimmed, cut_tokens = _junk_info(tokenizer, ids, output)
+        # 对照分在这里算：它要用 token 重建「去掉乱码的输出」，循环外已经拿不到了
+        passed_trimmed, _ = check_all(item["rules"], output_trimmed)
         truncated += int(len(ids) >= max_new_tokens)
-        junk_tail += int(has_other_script(output))
+        junk_tail += int(junk)
         records.append(
             {
                 "id": item["id"],
@@ -277,7 +303,10 @@ def run_ifollow(engine, tokenizer, path: Path, max_new_tokens: int) -> dict:
                 "sec": round(time.time() - began, 2),
                 "tokens": len(ids),
                 "truncated": len(ids) >= max_new_tokens,
-                "junk_tail": has_other_script(output),
+                "junk_tail": junk,
+                "junk_tokens": cut_tokens,
+                # 假设它在最后一个正常 token 处停下，这条规则过不过（不参与判分）
+                "passed_trimmed": passed_trimmed,
             }
         )
         print(f"  [{'✓' if passed else '✗'}] {item['id']:<18} {detail}")
@@ -294,16 +323,11 @@ def run_ifollow(engine, tokenizer, path: Path, max_new_tokens: int) -> dict:
 
     # 对照：把尾部乱码去掉再判一遍。
     # **不是为了改判分**（线上看原始输出，乱码是模型的真实输出），
-    # 而是让「这 1~3 个乱码 token 值多少分」变成可见的数字 ——
-    # 实测 sft-4b-v2 因此差 16pp（61.0% → 77.0%），不摆出来读者会以为是能力问题。
-    rules_by_id = {item["id"]: item["rules"] for item in items}
-    trimmed_ok = 0
-    flipped: list[str] = []
-    for record in records:
-        ok, _ = check_all(rules_by_id[record["id"]], trim_junk_tail(record["output"]))
-        trimmed_ok += int(ok)
-        if ok and not record["passed"]:
-            flipped.append(record["id"])
+    # 而是让「这一两个乱码 token 到底值多少分」变成可见的数字 ——
+    # 实测 sft-4b-v2 因此差 15pp（61.5% → 76.5%），不摆出来读者会以为是能力问题。
+    # 逐条的对照判定在生成循环里就算好了（要 token 才能重建输出），这里只汇总。
+    trimmed_ok = sum(1 for r in records if r["passed_trimmed"])
+    flipped = [r["id"] for r in records if r["passed_trimmed"] and not r["passed"]]
 
     result = _attach_ci({
         "total": total,
@@ -603,14 +627,15 @@ def run_gsm8k(engine, tokenizer, path: Path, max_new_tokens: int) -> dict:
         correct += int(hit)
         # 三个诊断位：被截断 / 按格式作答 / 尾巴有乱码。
         # 它们**不参与判分**，但决定这份分数可不可信 —— 截断率高说明生成长度给少了。
+        junk, _, cut_tokens = _junk_info(tokenizer, ids, output)
         truncated += int(len(ids) >= max_new_tokens)
         follows_format += int(follows_hash_format(output))
-        junk_tail += int(has_other_script(output))
+        junk_tail += int(junk)
         records.append({"id": item["id"], "correct": hit, "predicted": predicted,
                         "answer": item["answer"], "output": output,
                         "tokens": len(ids), "truncated": len(ids) >= max_new_tokens,
                         "follows_format": follows_hash_format(output),
-                        "junk_tail": has_other_script(output)})
+                        "junk_tail": junk, "junk_tokens": cut_tokens})
     total = len(items)
     result = _attach_ci({
         "total": total, "correct": correct,
@@ -645,12 +670,13 @@ def run_humaneval(engine, tokenizer, path: Path, max_new_tokens: int, timeout: i
         )
         passed, why = _run_python(program, timeout)
         correct += int(passed)
+        junk, _, cut_tokens = _junk_info(tokenizer, ids, output)
         truncated += int(len(ids) >= max_new_tokens)
-        junk_tail += int(has_other_script(output))
+        junk_tail += int(junk)
         records.append({"id": item["id"], "passed": passed, "detail": why,
                         "completion": completion, "raw_output": output,
                         "tokens": len(ids), "truncated": len(ids) >= max_new_tokens,
-                        "junk_tail": has_other_script(output)})
+                        "junk_tail": junk, "junk_tokens": cut_tokens})
         print(f"  [{'✓' if passed else '✗'}] {item['id']:<14} {why}")
     total = len(items)
     result = _attach_ci({

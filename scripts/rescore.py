@@ -52,7 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval as ev  # noqa: E402  复用执行方式与判分口径
 from answer_extract import (  # noqa: E402
     follows_hash_format,
-    has_other_script,
+    has_junk_tail,
     mmlu_letter,
     trim_junk_tail,
 )
@@ -164,6 +164,11 @@ def refresh_diagnostics(data: dict) -> list[str]:
     `junk_tail` 和 `follows_format` 完全由输出文本决定，所以早先跑的结果也能补上，
     不必重跑模型；`truncated` 需要 token 数，旧版本没存，只能留空 ——
     **不知道就留空，不猜**。
+
+    ⚠️ 这里是**文本层**判定：存档里只有生成文本、没有 token id，而乱码 token
+    `\\ufffd\\ufffd取` 解码后以正常汉字收尾，文本正则认不出来。所以补出来的
+    `junk_tail` 是**下界**（例如 GSM8K 会报 ~65% 而真实是 ~92%）。
+    要精确值必须重跑 —— 新结果里 `junk_tokens` 字段是按 token 量的。
     """
     touched = []
     for key, field in (("mmlu_gen", "generated"), ("mmlu_gen_plain", "generated"),
@@ -175,7 +180,7 @@ def refresh_diagnostics(data: dict) -> list[str]:
         junk = 0
         for record in slot["records"]:
             text = record.get(field) or ""
-            flag = has_other_script(text)
+            flag = has_junk_tail(text)
             record["junk_tail"] = flag
             junk += int(flag)
             if key == "gsm8k":

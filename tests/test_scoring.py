@@ -26,9 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from answer_extract import (  # noqa: E402
     follows_hash_format,
-    has_other_script,
+    has_junk_tail,
     last_number,
     mmlu_letter,
+    trailing_junk_len,
 )
 from code_extract import extract_code, strip_fence  # noqa: E402
 
@@ -114,11 +115,51 @@ case(
 
 # ============================================================ 乱码尾检测
 
-case("检出希伯来乱码", has_other_script("return s[::-1]\n``` לחלוט"), True)
-case("检出西里尔乱码", has_other_script("结果\nаци"), True)
-case("正常中文不误报", has_other_script("这个函数返回反转后的字符串"), False)
-case("正常英文不误报", has_other_script("the answer is 42"), False)
-case("代码不误报", has_other_script("def f():\n    return x[::-1]"), False)
+case("检出希伯来乱码", has_junk_tail("return s[::-1]\n``` לחלוט"), True)
+case("检出西里尔乱码", has_junk_tail("结果\nаци"), True)
+case("正常中文不误报", has_junk_tail("这个函数返回反转后的字符串"), False)
+case("正常英文不误报", has_junk_tail("the answer is 42"), False)
+case("代码不误报", has_junk_tail("def f():\n    return x[::-1]"), False)
+
+# 关键回归：替换字符 U+FFFD。原先的字符类只覆盖「其它文字系统」，漏了这一类，
+# 于是 GSM8K 的乱码尾被报成 65.3%（真实 92.3%）、指令遵循 75.5%（真实 84.5%）。
+case("检出替换字符乱码", has_junk_tail("#### 数字：18.�"), True)
+case("检出替换字符+真汉字", has_junk_tail("#### 数字：14.��取"), True)
+
+
+# --- token 层：乱码尾的唯一可靠判据 -----------------------------------------
+#
+# 为什么非要有这一层：`��取` 是**一个** token（字节级 BPE 的残缺片段，
+# 前两个无效字节解成 U+FFFD、后三个字节解成「取」）。文本层看它「以正常汉字
+# 收尾」，`[乱码字符]+$` 匹配不到 —— 既漏判也剪不干净。只有回头看 token 才准。
+class _FakeTokenizer:
+    """id → 字符串直接查表，够 trailing_junk_len 用。不需要真模型。"""
+
+    def __init__(self, table: dict[int, str]):
+        self.table = table
+
+    def decode(self, ids, skip_special_tokens: bool = True) -> str:
+        return "".join(self.table[int(i)] for i in ids)
+
+
+_tok = _FakeTokenizer({
+    0: "你好", 1: "，世界", 2: " לחלוט", 3: " ", 4: "��取", 5: "。", 6: " פייסב",
+})
+
+case("token 层：干净收尾不剪", trailing_junk_len(_tok, [0, 1, 5]), 0)
+case("token 层：希伯来乱码剪 1 个", trailing_junk_len(_tok, [0, 1, 2]), 1)
+case("token 层：另一个希伯来乱码也剪", trailing_junk_len(_tok, [0, 1, 6]), 1)
+# 这条是回归的核心：文本层认不出它，token 层必须认得
+case("token 层：��取 剪得掉（文本层剪不掉）", trailing_junk_len(_tok, [0, 1, 4]), 1)
+# 乱码后面还多吐了个空格 → 乱码和空格一起剪，别在答案里留个尾空格
+case("token 层：乱码+尾空白一起剪", trailing_junk_len(_tok, [0, 1, 2, 3]), 2)
+# 反过来：末尾只有一个空格、没有乱码 → 一个都不剪（不能白剪掉正常内容）
+case("token 层：只有尾空白不剪", trailing_junk_len(_tok, [0, 1, 5, 3]), 0)
+# 连续两个乱码 token 都要剪掉，但 max_scan 兜住「整段都是乱码」的极端情况
+case("token 层：连续两个乱码", trailing_junk_len(_tok, [0, 1, 2, 6]), 2)
+case("token 层：max_scan 上限", trailing_junk_len(_tok, [2, 6, 2, 6, 2, 6], max_scan=4), 4)
+case("token 层：空序列", trailing_junk_len(_tok, []), 0)
+case("token 层：全是空白", trailing_junk_len(_tok, [3, 3]), 0)
 
 
 # ============================================================ 指令遵循规则引擎
