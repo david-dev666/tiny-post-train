@@ -184,6 +184,7 @@ class VLLMEngine(BaseEngine):
         enforce_eager: bool = True,
         enable_prefix_caching: bool = False,
         max_lora_rank: int = 64,
+        ban_token_ids: tuple[int, ...] = (),
     ) -> None:
         import vllm
         from transformers import AutoTokenizer
@@ -213,6 +214,11 @@ class VLLMEngine(BaseEngine):
         # eval.py 决定（可能要覆盖成项目内置的干净模板），不能让引擎偷偷换一套。
         self.tokenizer = AutoTokenizer.from_pretrained(model_ref)
         self.stop_ids = P.stop_token_ids(self.tokenizer)
+        # 「上界探针」用：直接把已知的乱码 token 禁掉，量一量「只修这一个毛病」
+        # 到底值多少分。**不是修复方案** —— 硬禁只能挡住已经见过的 id，
+        # 模型换个没见过的乱码 token 照样吐（实测就有希伯来语词、阿拉伯语、
+        # 字节残缺三种形态）。真正的修法是让模型自己学会干净收尾（DPO）。
+        self.ban_token_ids = tuple(int(t) for t in ban_token_ids)
         super().__init__()
         self.config.update({
             "backend": "vllm.LLM.generate",
@@ -224,6 +230,9 @@ class VLLMEngine(BaseEngine):
             "enforce_eager": enforce_eager,
             "enable_prefix_caching": enable_prefix_caching,
             "lora": adapter,
+            # 探针配置必须落盘：带禁用和不带禁用是两把尺子，
+            # 不记下来事后看到两份不同的 json 只能猜（这个坑踩过一次）
+            "ban_token_ids": list(self.ban_token_ids),
         })
 
     def run(self, prompts: list[str], max_new_tokens: int, on_progress=None) -> list[GenOut]:
@@ -235,6 +244,8 @@ class VLLMEngine(BaseEngine):
             max_tokens=max_new_tokens,
             stop_token_ids=self.stop_ids,
             skip_special_tokens=True,
+            # logit_bias 给 -100 等于禁掉该 token（只在开了 --ban-token-ids 时才非空）
+            logit_bias={t: -100.0 for t in self.ban_token_ids} or None,
         )
         outputs = self.llm.generate(
             prompts, params, lora_request=self.lora_request, use_tqdm=False,

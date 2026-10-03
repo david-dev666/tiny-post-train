@@ -40,32 +40,10 @@ import torch  # noqa: E402
 from unsloth import FastLanguageModel  # noqa: E402
 
 import eval as eval_module  # noqa: E402 —— 复用同一套 Wilson 区间，免得两个脚本算法漂移
+import prompts as P  # noqa: E402 —— 裁判提示词与判定翻译的唯一来源（纯模块）
 import train_sft as ts  # noqa: E402
 
 _wilson_ci = eval_module._wilson_ci
-
-JUDGE_PROMPT = """你是一个严格的评审。下面是一道问题和两份回答，请判断哪一份更好。
-
-评判标准，按重要性排序：
-1. 是否正确——有没有事实错误、有没有编造
-2. 是否切题——有没有答非所问
-3. 是否遵守了问题里的约束（字数、格式、结构等）
-4. 是否完整、清楚、有条理
-
-注意：更长的回答不等于更好。啰嗦、套话、重复都是缺点。
-如果两份回答质量确实相当，判平局。
-
-【问题】
-{question}
-
-【回答一】
-{answer_one}
-
-【回答二】
-{answer_two}
-
-请只输出一个字母：一 / 二 / 平"""
-
 
 def _load_judge(path: str, max_seq_len: int):
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -80,7 +58,7 @@ def _load_judge(path: str, max_seq_len: int):
 
 
 def _ask(model, tokenizer, question: str, answer_one: str, answer_two: str, max_new_tokens: int) -> str:
-    prompt = JUDGE_PROMPT.format(question=question, answer_one=answer_one, answer_two=answer_two)
+    prompt = P.JUDGE_PROMPT.format(question=question, answer_one=answer_one, answer_two=answer_two)
     text = tokenizer.apply_chat_template(
         [{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True
     )
@@ -92,22 +70,16 @@ def _ask(model, tokenizer, question: str, answer_one: str, answer_two: str, max_
             eos_token_id=ts.stop_token_ids(tokenizer),
         )
     reply = tokenizer.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
-    for char in reply:
-        if char in "一二平":
-            return char
-    return "?"
+    return P.parse_verdict(reply)
 
 
 def _verdict(choice: str, swapped: bool) -> str:
-    """把「一/二/平」翻译成不依赖顺序的结论。"""
-    if choice == "平":
-        return "tie"
-    if choice == "?":
-        return "unparsed"
-    first_is_b = swapped  # 交换过的话，回答一就是 B
-    if choice == "一":
-        return "b" if first_is_b else "a"
-    return "a" if first_is_b else "b"
+    """把「一/二/平」翻译成不依赖顺序的结论。
+
+    实现在 `prompts.verdict` —— 造 DPO 偏好数据要用同一份，
+    换位翻译写错一次就会把一部分偏好对**标反**，而且完全看不出来。
+    """
+    return P.verdict(choice, swapped)
 
 
 def draw(ok: int, total: int, width: int = 30) -> str:

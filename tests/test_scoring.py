@@ -162,6 +162,41 @@ case("token 层：空序列", trailing_junk_len(_tok, []), 0)
 case("token 层：全是空白", trailing_junk_len(_tok, [3, 3]), 0)
 
 
+# ============================================================ DPO 偏好数据构造
+#
+# `build_stop_pairs` 是纯函数，不需要 GPU，本地秒跑，所以必须进单测 ——
+# 它决定 DPO 到底学什么。造错了不会报任何错，只会训出一个怪模型。
+from make_dpo_data import build_stop_pairs  # noqa: E402
+
+_stop_tok = _FakeTokenizer({
+    0: "1024", 1: ".", 2: " לחלוט", 3: " ", 4: "��取", 5: "你好", 6: "，世界", 7: "。",
+})
+_stop_records = [
+    {"text": "你好，世界。", "ids": [5, 6, 7], "truncated": False},       # 干净收尾
+    {"text": "1024. לחלוט", "ids": [0, 1, 2], "truncated": False},        # 乱码尾
+    {"text": "1024. לחלוט", "ids": [0, 1, 2], "truncated": True},         # 被截断
+    {"text": "1024.��取", "ids": [0, 1, 4], "truncated": False},          # U+FFFD 型
+    {"text": "1024. לחלוט ", "ids": [0, 1, 2, 3], "truncated": False},    # 乱码+尾空白
+    {"text": " לחלוט", "ids": [2], "truncated": False},                   # 整条是乱码
+]
+_pairs, _stats, _junk = build_stop_pairs(["q"] * 6, _stop_records, _stop_tok)
+
+case("DPO：截断的题丢掉（那里没有收尾决策）", _stats["截断（丢弃）"], 1)
+case("DPO：干净收尾的题丢掉", _stats["干净收尾（丢弃）"], 1)
+case("DPO：整条都是乱码的丢掉", _stats["剪完是空的（丢弃）"], 1)
+case("DPO：留下 3 对", _stats["保留"], 3)
+case("DPO：chosen 就是剪掉乱码那一份", [p["chosen"] for p in _pairs], ["1024."] * 3)
+# 关键回归：`��取` 在文本层看着「以正常汉字收尾」，正则剪不掉；必须按 token 剪
+case("DPO：U+FFFD 型乱码也剪得掉", _pairs[1]["chosen"], "1024.")
+case("DPO：乱码+尾空白一起剪，不留尾空格", _pairs[2]["chosen"], "1024.")
+case("DPO：chosen_from 必须是 sft（否则 train_dpo 报误导性警告）",
+     sorted({p["chosen_from"] for p in _pairs}), ["sft"])
+case("DPO：chosen 与 rejected 不能相同（相同则梯度为 0）",
+     all(p["chosen"] != p["rejected"] for p in _pairs), True)
+# 禁用列表里不能混进空白 token —— 它会被拿去 --ban-token-ids 把空格禁掉，答案当场变形
+case("DPO：乱码 id 统计不含空白 token", dict(_junk), {2: 2, 4: 1})
+
+
 # ============================================================ 指令遵循规则引擎
 
 import rules  # noqa: E402

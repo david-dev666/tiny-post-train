@@ -108,6 +108,67 @@ def code_prompt(humaneval_prompt: str) -> str:
     return render_clean(CODE_INSTRUCTION.format(prompt=humaneval_prompt))
 
 
+# ------------------------------------------------------------------ 裁判
+
+# 成对偏好的裁判提示词。**唯一来源**：离线评测的 OpenQA 裁判
+# （`judge_openqa.py`）和造 DPO 偏好数据（`make_dpo_data.py`）都用这一份 ——
+# 两处各写一份必然漂移，本项目已经因为「实现抄成两份」栽过三次。
+#
+# 措辞里有两条是刻意加的：
+#   「更长的回答不等于更好」—— 否则裁判会系统性偏向啰嗦的那个，
+#     而我们的 SFT 恰好就是啰嗦的那个，等于把缺陷判成优点
+#   「质量相当就判平局」—— 逼裁判在没差别时明说，减少噪音对
+JUDGE_PROMPT = """你是一个严格的评审。下面是一道问题和两份回答，请判断哪一份更好。
+
+评判标准，按重要性排序：
+1. 是否正确——有没有事实错误、有没有编造
+2. 是否切题——有没有答非所问
+3. 是否遵守了问题里的约束（字数、格式、结构等）
+4. 是否完整、清楚、有条理
+
+注意：更长的回答不等于更好。啰嗦、套话、重复都是缺点。
+如果两份回答质量确实相当，判平局。
+
+【问题】
+{question}
+
+【回答一】
+{answer_one}
+
+【回答二】
+{answer_two}
+
+请只输出一个字母：一 / 二 / 平"""
+
+# 裁判会吐的第一个判定字符。顺序无关：`verdict()` 负责翻译成「谁更好」。
+VERDICT_CHARS = "一二平"
+
+
+def parse_verdict(reply: str) -> str:
+    """从裁判输出里取判定。取不到返回 `?`（= 解析失败，调用方应当丢弃这一对）。"""
+    for char in reply:
+        if char in VERDICT_CHARS:
+            return char
+    return "?"
+
+
+def verdict(choice: str, swapped: bool) -> str:
+    """把「一/二/平」翻译成不依赖顺序的结论：`a` / `b` / `tie` / `unparsed`。
+
+    `swapped=True` 表示这次提问时**回答一其实是 B**（换位那一次）。
+    不处理换位就会被裁判的位置偏置带跑 —— 实测这能把结论翻掉相当一部分，
+    所以 `judge_openqa.py` 和造 DPO 数据都用「两次一致才收」。
+    """
+    if choice == "平":
+        return "tie"
+    if choice == "?":
+        return "unparsed"
+    first_is_b = swapped
+    if choice == "一":
+        return "b" if first_is_b else "a"
+    return "a" if first_is_b else "b"
+
+
 # ------------------------------------------------------------------ 停止符
 
 
