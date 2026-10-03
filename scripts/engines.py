@@ -94,10 +94,11 @@ class BaseEngine:
 
 
 class HFEngine(BaseEngine):
-    """unsloth / HuggingFace 路径。**行为与换引擎前完全一致**，用来做基准与兜底。
+    """unsloth / HuggingFace 路径。**行为与换引擎前逐字节一致**，用来做对照与兜底。
 
-    它是唯一能做 `mmlu_logit` 口径的后端：那个口径要读「答案：」后面那个位置
-    任意 token 的 logits，vLLM 只给 top-k logprobs，取不到。
+    比 vLLM 慢 16.7×（9.43 vs 0.57 s/题），所以不是默认。留着它的理由只有两个：
+    想知道「换引擎本身让分数动了多少」，以及 vLLM 环境出问题时的退路。
+    **两个引擎的分数不能混着比**，见 VLLMEngine 的说明。
     """
 
     name = "hf"
@@ -263,8 +264,3 @@ def make_engine(name: str, model_ref: str, **kwargs) -> BaseEngine:
 # 两个后端在结果 json 里留下的 `engine` 字段取值。报告靠它判断
 # 「这几行分数是不是同一把尺子量的」，所以只能从这里取，不许各写各的字面量。
 ENGINES = ("hf", "vllm")
-
-# 只有 HF 能做 mmlu_logit：它要读「答案：」后面那个位置**任意** token 的 logits，
-# vLLM 只暴露 top-k logprobs，取不到。跑 logit 口径时用 vllm 直接报错，
-# 而不是悄悄跳过 —— 悄悄跳过会让人以为「这个口径也算过了」。
-LOGIT_ONLY_HF = "mmlu"

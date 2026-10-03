@@ -24,12 +24,15 @@
 **每个准确率都带 95% 置信区间（Wilson）**。这不是装饰：456 题上区间有 ±4.6pp，
 只报点估计（"26.5%"）会让人以为精确到 0.1pp，据此下的结论多半是错的。
 
-**为什么 logits 口径要降级**：它和生成式口径可以给出完全相反的结论。
-`scripts/train_sft.py` 里训练曲线的 MMLU 用的就是这个 logits 口径，
-读那条曲线时务必记住它的局限。
+**这里没有 logits 口径。** 曾经有过一个「只比 `答案：` 后四个字母的 logits、
+完全不生成」的参考口径，已从评测流程移除：它只有 HF 引擎能算（要读全词表 logits，
+vLLM 只给 top-k logprobs），留着就会变成「一份 vLLM 结果里嵌一个 HF 算的块」，
+破掉「整批结果必须同一把尺子」这条底线。它想回答的问题也已经用别的方式答了
+（MMLU 两列 + 探针打印的生成原文）。训练看板上的 MMLU 曲线仍是那个口径，
+读那条曲线时注意它的局限。
 
-MMLU(logit) 与采样判分**刻意复用 train_sft 里的实现**（BenchCallback.evaluate /
-ProbeCallback.score），保证离线评测和训练曲线是同一把尺子，不会出现
+采样判分**刻意复用 `metrics.repetition_metrics`**（训练侧的 `ProbeCallback.score`
+是它的转发），保证离线评测和训练曲线是同一把尺子，不会出现
 「训练图上是 26%，离线测出来 30%」这种对不上的情况。
 
 用法
@@ -327,11 +330,11 @@ MMLU_STYLES = {"chat": ("chat",), "plain": ("plain",), "both": ("chat", "plain")
 
 # 结果 json 里的「块」。--update 合并时靠它区分「这次重算的」和「上次沿用的」，
 # 沿用来的块代码指纹对不上当前代码，必须能在报告里看出来。
-RESULT_BLOCKS = ("mmlu_gen", "mmlu_gen_plain", "mmlu_logit", "ifollow",
+RESULT_BLOCKS = ("mmlu_gen", "mmlu_gen_plain", "ifollow",
                  "gsm8k", "humaneval", "probes", "openqa")
 
 # 结果文件的格式版本。以后字段有变动就 +1，方便一眼看出新旧。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _file_sha(path: Path, length: int = 16) -> str:
@@ -352,10 +355,12 @@ def _file_sha(path: Path, length: int = 16) -> str:
 # prompts.py 也在内：它现在供给 GSM8K / 代码题的**卷面原文**，
 # 改一个字的措辞，分数就可能变 —— 那是比判分更上游的变量，不记指纹等于没记。
 # engines.py 同理：生成参数（采样、停止符截断语义）在那里。
+# train_sft.py **不在内**：它已经不影响评测结果了（那个复用它的 logits 口径被移除，
+# 采样指标下沉到了 metrics）。留着它只会让「改了训练代码」被误报成「判分栈变了」。
 SCORING_MODULES = (
     "eval.py", "rules.py", "metrics.py",
     "answer_extract.py", "code_extract.py",
-    "prompts.py", "engines.py", "train_sft.py",
+    "prompts.py", "engines.py",
 )
 
 
@@ -377,7 +382,6 @@ def _code_version() -> dict:
     ).hexdigest()[:12]
     info = {
         "eval_py_sha": modules.get("eval.py", ""),          # 旧字段，报告仍在用
-        "train_sft_py_sha": modules.get("train_sft.py", ""),
         "scoring_modules": modules,
         "scoring_stack_sha": stack,
     }
@@ -408,17 +412,6 @@ def _subset_info(path: Path) -> dict:
 from metrics import attach_ci as _attach_ci  # noqa: E402
 from metrics import repetition_metrics as _repetition_metrics  # noqa: E402
 from metrics import wilson_ci as _wilson_ci  # noqa: E402
-
-
-def _train_sft():
-    """延迟导入训练模块，**只有 HF 专属功能（mmlu_logit 口径）才需要它**。
-
-    不能在模块顶部 import：`train_sft` 顶层 `import unsloth`，
-    而 vllm 环境装不了 unsloth —— 顶部导入会让 `--engine vllm` 连启动都启动不了。
-    """
-    import train_sft
-
-    return train_sft
 
 
 
@@ -466,9 +459,9 @@ def _mmlu_prompt(tokenizer, item, style: str = "chat") -> str:
 def run_mmlu_gen(engine, tokenizer, path: Path, max_new_tokens: int, style: str = "chat") -> dict:
     """生成式判分：让模型自己生成，取第一个 A/B/C/D。
 
-    这才是端到端能力。logits 口径（run_mmlu_logit）测的是「答案：后面那个位置
-    偏不偏向某个字母」，base 模型有这个偏置是预训练残留，SFT 会把它冲掉，
-    但**不代表模型不会答题** —— 两者可以给出完全相反的结论，所以默认用这个。
+    这是端到端能力：既要知道答案，也要按格式把它吐出来。
+    （曾经的 logits 口径只比「答案：」后四个字母的 logits、完全不生成，
+     和这里可以给出相反结论 —— 已从评测流程移除，理由见 docs/01-评测.md。）
 
     `style` 见 `_mmlu_prompt`：`plain` 给基座用，`chat` 给指令微调过的模型用。
     """
@@ -529,26 +522,6 @@ def run_mmlu_gen(engine, tokenizer, path: Path, max_new_tokens: int, style: str 
         f"  {correct}/{total} = {result['accuracy']:.1%} ± {result['ci95_half_pp']}pp"
         f"（解析不出字母 {noparse} 条，{result['sec']}s，随机基准 25%）"
     )
-    return result
-
-
-def run_mmlu_logit(engine, tokenizer, path: Path, batch_size: int) -> dict:
-    """logits 口径。**只有 HF 引擎能做** —— 它要读「答案：」后面那个位置任意 token
-    的 logits，vLLM 只暴露 top-k logprobs，取不到（main() 里会先拦掉）。
-    """
-    ts = _train_sft()
-    print(f"\n== MMLU 子集 · logits 口径（{path.name}）==")
-    # out_path 只是构造参数，这里直接调 evaluate()，不会写文件
-    callback = ts.BenchCallback(
-        path,
-        every=1,
-        out_path=Path(tempfile.gettempdir()) / "tpt-eval-bench.jsonl",
-        tokenizer=tokenizer,
-        batch_size=batch_size,
-    )
-    result = _attach_ci(callback.evaluate(engine.model, tokenizer, step=0))
-    print(f"  {result['correct']}/{result['total']} = {result['accuracy']:.1%}"
-          f" ± {result['ci95_half_pp']}pp（随机基准 {result['chance']:.0%}，{result['sec']}s）")
     return result
 
 
@@ -752,9 +725,6 @@ def parse_args():
                         help="指令遵循题目的生成长度上限")
     parser.add_argument("--probe-max-new-tokens", type=int, default=128,
                         help="与训练时 --probe-max-new-tokens 保持一致，否则复读率不可比")
-    parser.add_argument("--bench-batch-size", type=int, default=16)
-    parser.add_argument("--mmlu-mode", default="gen", choices=["gen", "logit", "both"],
-                        help="gen=生成式（默认，端到端能力）；logit=只比字母 logits（参考）；both=都跑")
     parser.add_argument("--mmlu-style", default="chat", choices=["chat", "plain", "both"],
                         help="MMLU 生成式的提问口径。chat=带对话模板（指令微调模型用）；"
                              "plain=纯文本 Question/Answer（**基座必须用这个**，否则复读题干得 0 分）；"
@@ -768,10 +738,11 @@ def parse_args():
                         help="auto：挂 adapter 用干净模板，官方 instruct 用其自带模板；"
                              "clean：强制项目内置干净模板；tokenizer：强制 tokenizer 自带")
     parser.add_argument("--load-in-4bit", action="store_true")
-    parser.add_argument("--engine", default="hf", choices=list(ENGINES),
-                        help="生成后端。hf=unsloth 逐条（基准/兜底，能做 mmlu_logit）；"
-                             "vllm=批量推理，实测快 16.7×。**装了 unsloth 的是 tpt 环境，"
-                             "vllm 要用 /root/autodl-tmp/envs/vllm/bin/python 跑**。"
+    parser.add_argument("--engine", default="vllm", choices=list(ENGINES),
+                        help="生成后端。vllm=批量推理，实测快 16.7×（默认）；"
+                             "hf=unsloth 逐条，慢但与换引擎前逐字节一致（备用/对照）。"
+                             "**装了 unsloth 的是 tpt 环境，vllm 要用 "
+                             "/root/autodl-tmp/envs/vllm/bin/python 跑**。"
                              "两个引擎的分数不能混着比（数值路径不同，逐题会翻转）")
     parser.add_argument("--vllm-gpu-util", type=float, default=0.85)
     parser.add_argument("--vllm-no-eager", action="store_true",
@@ -804,14 +775,6 @@ def main():
     print(f"==> 项目根：{PROJECT_DIR}")
     if LOCAL_MODEL_PATH:
         print(f"==> 本地权重 {LOCAL_MODEL_PATH}，已强制离线（HF_HUB_OFFLINE=1）")
-
-    # logit 口径要读「答案：」后面那个位置**任意** token 的 logits，
-    # vLLM 只暴露 top-k logprobs，取不到。直接拦掉，而不是悄悄跳过 ——
-    # 悄悄跳过会让人以为「这个口径也算过了」。
-    if args.engine == "vllm" and args.mmlu_mode in ("logit", "both"):
-        sys.exit("!! mmlu_logit 口径只有 HF 引擎能做（要读全词表 logits）。"
-                 "请用 --engine hf --mmlu-mode logit 单跑这一项，"
-                 "或改 --mmlu-mode gen。")
 
     # adapter：HF 走 unsloth 的适配器加载；vLLM 走它自己的 LoRA 支持。
     # 两边都需要一个「base_model_name_or_path 指向 --model」的目录，
@@ -868,27 +831,21 @@ def main():
             "code_max_new_tokens": args.code_max_new_tokens,
             "openqa_max_new_tokens": args.openqa_max_new_tokens,
             "code_timeout": args.code_timeout,
-            "bench_batch_size": args.bench_batch_size,
         },
         # limit 必须记进来。**之前漏了它，导致 make_report 的「截断档」告警是死代码**：
         # 报告读的是 requested["limit"]，永远取不到 → 一批只跑了前 400 题的结果
         # 在页面上和全量结果长得一模一样，没有任何提示。
-        "requested": {"only": sorted(wanted), "mmlu_mode": args.mmlu_mode,
+        "requested": {"only": sorted(wanted),
                       "mmlu_style": args.mmlu_style, "limit": LIMIT or None},
     }
 
     if "mmlu" in wanted:
-        if args.mmlu_mode in ("gen", "both"):
-            # chat / plain 各存一份，互不覆盖：base 与 instruct 需要不同口径，
-            # 只留一种总有一方被错怪。--mmlu-style both 就是两种都跑。
-            for style in MMLU_STYLES[args.mmlu_style]:
-                key = "mmlu_gen" if style == "chat" else f"mmlu_gen_{style}"
-                result[key] = run_mmlu_gen(
-                    engine, tokenizer, Path(args.mmlu), args.mmlu_max_new_tokens, style
-                )
-        if args.mmlu_mode in ("logit", "both"):
-            result["mmlu_logit"] = run_mmlu_logit(
-                engine, tokenizer, Path(args.mmlu), args.bench_batch_size
+        # chat / plain 各存一份，互不覆盖：base 与 instruct 需要不同口径，
+        # 只留一种总有一方被错怪。--mmlu-style both 就是两种都跑。
+        for style in MMLU_STYLES[args.mmlu_style]:
+            key = "mmlu_gen" if style == "chat" else f"mmlu_gen_{style}"
+            result[key] = run_mmlu_gen(
+                engine, tokenizer, Path(args.mmlu), args.mmlu_max_new_tokens, style
             )
     if "ifollow" in wanted:
         result["ifollow"] = run_ifollow(engine, tokenizer, Path(args.ifollow), args.max_new_tokens)
@@ -955,8 +912,6 @@ def main():
     if "mmlu_gen_plain" in result:
         line("MMLU(plain)", result["mmlu_gen_plain"])
         print(f"{'':<16}  解析不出字母 {result['mmlu_gen_plain']['unparsed']} 条")
-    if "mmlu_logit" in result:
-        line("MMLU(logits)", result["mmlu_logit"])
     if "ifollow" in result:
         line("指令遵循", result["ifollow"], key="rate")
         for category, slot in sorted(result["ifollow"]["by_category"].items()):

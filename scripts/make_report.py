@@ -37,7 +37,6 @@ MAIN_SUITES = [
     ("ifollow", "指令遵循", False, "带硬约束的指令，看听不听话"),
     ("gsm8k", "GSM8K（数学）", False, "答案唯一，可验证"),
     ("humaneval", "HumanEval（代码）", False, "真执行 + 跑单测"),
-    ("mmlu_logit", "MMLU（logits）", None, "参考口径，只看字母倾向"),
 ]
 
 # 每个模型固定一个颜色，方便跨图对照
@@ -435,7 +434,7 @@ def render(results: list[dict], judges: list[dict]) -> str:
                 slot = data.get(key) or {}
                 values = [r.get(key, {}).get("accuracy", r.get(key, {}).get("rate"))
                           for r in active if r.get(key)]
-                best = max([v for v in values if v is not None], default=None) if key != "mmlu_logit" else None
+                best = max([v for v in values if v is not None], default=None)
                 value = slot.get("accuracy", slot.get("rate"))
                 parts.append(
                     '<td class="num">'

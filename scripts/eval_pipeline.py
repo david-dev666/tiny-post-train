@@ -64,7 +64,6 @@ LOGS = PROJECT_DIR / "logs"
 # 报告里用什么名字显示每个评测项（顺序即表格顺序）
 SUITE_TITLES = {
     "mmlu_gen": "MMLU（生成式）",
-    "mmlu_logit": "MMLU（logits）",
     "ifollow": "指令遵循",
     "gsm8k": "GSM8K（数学）",
     "humaneval": "HumanEval（代码）",
@@ -170,9 +169,9 @@ def main():
                         help="已完成的结果也重跑（默认跳过，方便断点续跑）")
     parser.add_argument("--parallel", type=int, default=1,
                         help="同时跑几个模型（默认 1 串行）。24G 卡建议 2，再多会抢带宽并逼近显存上限")
-    parser.add_argument("--engine", default="hf", choices=["hf", "vllm"],
-                        help="生成后端。hf=unsloth（需要 tpt 环境）；"
-                             "vllm=批量推理快 16.7×（需要独立环境，见 TPT_VLLM_PYTHON）。"
+    parser.add_argument("--engine", default="vllm", choices=["hf", "vllm"],
+                        help="生成后端。vllm=批量推理快 16.7×（默认，需要独立环境，"
+                             "见 TPT_VLLM_PYTHON）；hf=unsloth（需要 tpt 环境，慢）。"
                              "**两个引擎的分数不能混着比**，换引擎要整批重跑")
     parser.add_argument("--python", default=None,
                         help="跑 eval.py 用的解释器。不给就按 --engine 自动挑")
@@ -182,6 +181,10 @@ def main():
     args = parser.parse_args()
     if not args.python:
         args.python = VLLM_PYTHON if args.engine == "vllm" else sys.executable
+    if args.engine == "vllm" and not Path(args.python).exists():
+        sys.exit(f"!! 找不到 vLLM 环境的解释器：{args.python}\n"
+                 f"   用 TPT_VLLM_PYTHON 指定，或 --python 直接给路径，"
+                 f"或改 --engine hf（慢 16.7×）")
     if args.engine == "vllm" and args.parallel > 1:
         # vLLM 单进程就会把整张卡喂满（continuous batching 自己会调度），
         # 再并行只会互相抢显存。这和 HF 路径（单进程只有 9% 利用率）正好相反。
