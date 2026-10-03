@@ -1,0 +1,200 @@
+{"id": "len-20", "category": "长度约束", "desc": "不超过 20 字（不计空白）", "prompt": "用不超过 20 个字介绍一下北京。", "rules": [{"type": "max_chars", "n": 20}]}
+{"id": "len-50-http", "category": "长度约束", "desc": "不超过 50 字（不计空白）", "prompt": "用 50 个字以内解释什么是 HTTP。", "rules": [{"type": "max_chars", "n": 50}]}
+{"id": "one-line", "category": "格式约束", "desc": "输出只有一行，不含换行", "prompt": "只回答一行，不要换行：1+1 等于几？", "rules": [{"type": "single_line"}]}
+{"id": "json-only", "category": "格式约束", "desc": "输出是合法 JSON 对象，且没有代码围栏", "prompt": "只输出一个 JSON 对象，包含 name 和 age 两个字段，值分别是 \"Tom\" 和 18。不要输出任何其他文字。", "rules": [{"type": "json_object"}, {"type": "not_contains", "words": ["```"]}]}
+{"id": "code-no-fence", "category": "格式约束", "desc": "输出是可解析的 Python 代码，且没有 ``` 围栏", "prompt": "只输出 Python 代码，不要用 ``` 代码块包裹，不要任何解释：写一个函数 add(a, b) 返回两数之和。", "rules": [{"type": "python_code"}, {"type": "not_contains", "words": ["```"]}]}
+{"id": "no-ai-prefix", "category": "禁忌词", "desc": "开头不得出现「作为一个 AI」「当然」等套话", "prompt": "回答时不要以「作为一个 AI」或「当然」开头。问题：什么是机器学习？", "rules": [{"type": "no_prefix", "prefixes": ["作为一个", "作为 AI", "作为AI", "当然", "首先"]}]}
+{"id": "no-apology", "category": "禁忌词", "desc": "不得出现道歉用语", "prompt": "不要道歉，不要说「抱歉」「对不起」，直接回答：天空为什么是蓝色的？", "rules": [{"type": "not_contains", "words": ["抱歉", "对不起", "遗憾"]}]}
+{"id": "no-markdown", "category": "禁忌词", "desc": "不得出现 Markdown 标记 # * ` >", "prompt": "不要使用任何 Markdown 标记（#、*、`、>），用纯文本介绍什么是 Python。", "rules": [{"type": "not_contains", "words": ["#", "*", "`", ">"]}]}
+{"id": "three-bullets", "category": "结构约束", "desc": "至少三行以「- 」开头", "prompt": "用三个要点列出学习编程的建议，每个要点单独一行，并且以「- 」开头。", "rules": [{"type": "line_prefix_count", "prefix": "- ", "n": 3}]}
+{"id": "numbered-three", "category": "结构约束", "desc": "1. / 2. / 3. 三个编号各自出现在行首", "prompt": "用 1. 2. 3. 的编号形式列出三种水果，每行一个。", "rules": [{"type": "line_starts_with_all", "prefixes": ["1.", "2.", "3."]}]}
+{"id": "starts-with-yes", "category": "结构约束", "desc": "第一行以「是」开头", "prompt": "先在第一行只回答「是」，然后再解释原因。问题：Python 是解释型语言吗？", "rules": [{"type": "starts_with", "text": "是"}]}
+{"id": "end-with-marker", "category": "结构约束", "desc": "以 END 结尾", "prompt": "回答结束时必须以「END」结尾，END 后面不要有任何字符。问题：什么是二叉树？", "rules": [{"type": "ends_with", "text": "END"}]}
+{"id": "exactly-three-lines", "category": "结构约束", "desc": "恰好三行非空文本", "prompt": "用恰好三行回答：你喜欢哪种水果？每行一句话，不要有空行。", "rules": [{"type": "line_count_eq", "n": 3}]}
+{"id": "keywords-three", "category": "内容约束", "desc": "同时包含 猫 / 狗 / 宠物", "prompt": "用一句话同时提到「猫」「狗」和「宠物」这三个词。", "rules": [{"type": "contains_all", "words": ["猫", "狗", "宠物"]}]}
+{"id": "chinese-only", "category": "语言约束", "desc": "不出现任何英文字母", "prompt": "只用中文回答，不要出现任何英文字母：介绍一下太阳系。", "rules": [{"type": "ascii_letters_max", "n": 0}]}
+{"id": "english-only", "category": "语言约束", "desc": "不出现任何中日韩汉字", "prompt": "Answer in English only. Do not use any Chinese characters: what is a variable?", "rules": [{"type": "no_cjk"}]}
+{"id": "exactly-5-words", "category": "语言约束", "desc": "恰好 5 个英文单词", "prompt": "Write exactly 5 words about the sun. Output only those 5 words.", "rules": [{"type": "word_count_eq", "n": 5}]}
+{"id": "numeric-9", "category": "数值约束", "desc": "输出就是数字 9，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：3 的平方是多少？", "rules": [{"type": "numeric_eq", "n": 9}]}
+{"id": "roman-vii", "category": "数值约束", "desc": "输出就是 VII", "prompt": "用罗马数字表示 7，只输出罗马数字本身，不要任何其他内容。", "rules": [{"type": "equals_ci", "text": "VII"}]}
+{"id": "code-def-name", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def reverse_string", "prompt": "只输出 Python 代码，不要解释：写一个函数 reverse_string(s)，返回反转后的字符串。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def reverse_string"]}]}
+{"id": "len-g01", "category": "长度约束", "desc": "不超过 10 字（不计空白）", "prompt": "用不超过 10 个字回答：中国的首都是哪里？（只回答城市名，不要解释）", "rules": [{"type": "max_chars", "n": 10}]}
+{"id": "len-g02", "category": "长度约束", "desc": "不超过 15 字（不计空白）", "prompt": "用不超过 15 个字回答：解释什么是 CPU。（越短越好）", "rules": [{"type": "max_chars", "n": 15}]}
+{"id": "len-g03", "category": "长度约束", "desc": "不超过 15 字（不计空白）", "prompt": "用不超过 15 个字回答：列出两种编程语言。（只列名字）", "rules": [{"type": "max_chars", "n": 15}]}
+{"id": "len-g04", "category": "长度约束", "desc": "不超过 20 字（不计空白）", "prompt": "用不超过 20 个字回答：说明水的化学式。（只回答这一件事）", "rules": [{"type": "max_chars", "n": 20}]}
+{"id": "len-g05", "category": "长度约束", "desc": "不超过 20 字（不计空白）", "prompt": "用不超过 20 个字回答：介绍一下杭州。（不要展开）", "rules": [{"type": "max_chars", "n": 20}]}
+{"id": "len-g06", "category": "长度约束", "desc": "不超过 25 字（不计空白）", "prompt": "用不超过 25 个字回答：解释什么是 API。（不要举例）", "rules": [{"type": "max_chars", "n": 25}]}
+{"id": "len-g07", "category": "长度约束", "desc": "不超过 25 字（不计空白）", "prompt": "用不超过 25 个字回答：说明为什么天空是蓝色的。（一句话说完）", "rules": [{"type": "max_chars", "n": 25}]}
+{"id": "len-g08", "category": "长度约束", "desc": "不超过 30 字（不计空白）", "prompt": "用不超过 30 个字回答：介绍 Python 这门语言。（不要列优点）", "rules": [{"type": "max_chars", "n": 30}]}
+{"id": "len-g09", "category": "长度约束", "desc": "不超过 30 字（不计空白）", "prompt": "用不超过 30 个字回答：解释什么是数据库。（不要类比）", "rules": [{"type": "max_chars", "n": 30}]}
+{"id": "len-g10", "category": "长度约束", "desc": "不超过 30 字（不计空白）", "prompt": "用不超过 30 个字回答：说明 1+1=2 的原因。（不要展开数学定义）", "rules": [{"type": "max_chars", "n": 30}]}
+{"id": "len-g11", "category": "长度约束", "desc": "不超过 35 字（不计空白）", "prompt": "用不超过 35 个字回答：解释什么是操作系统。（不要列举例子）", "rules": [{"type": "max_chars", "n": 35}]}
+{"id": "len-g12", "category": "长度约束", "desc": "不超过 35 字（不计空白）", "prompt": "用不超过 35 个字回答：介绍长江。（不要写数据）", "rules": [{"type": "max_chars", "n": 35}]}
+{"id": "len-g13", "category": "长度约束", "desc": "不超过 40 字（不计空白）", "prompt": "用不超过 40 个字回答：解释什么是算法。（不要举代码例子）", "rules": [{"type": "max_chars", "n": 40}]}
+{"id": "len-g14", "category": "长度约束", "desc": "不超过 40 字（不计空白）", "prompt": "用不超过 40 个字回答：说明什么是云计算。（不要讲历史）", "rules": [{"type": "max_chars", "n": 40}]}
+{"id": "len-g15", "category": "长度约束", "desc": "不超过 40 字（不计空白）", "prompt": "用不超过 40 个字回答：介绍太阳系。（不要逐个行星展开）", "rules": [{"type": "max_chars", "n": 40}]}
+{"id": "len-g16", "category": "长度约束", "desc": "不超过 45 字（不计空白）", "prompt": "用不超过 45 个字回答：解释什么是机器学习。（不要分类展开）", "rules": [{"type": "max_chars", "n": 45}]}
+{"id": "len-g17", "category": "长度约束", "desc": "不超过 45 字（不计空白）", "prompt": "用不超过 45 个字回答：说明什么是区块链。（不要讲币）", "rules": [{"type": "max_chars", "n": 45}]}
+{"id": "len-g18", "category": "长度约束", "desc": "不超过 50 字（不计空白）", "prompt": "用不超过 50 个字回答：解释什么是 LoRA。（不要写公式）", "rules": [{"type": "max_chars", "n": 50}]}
+{"id": "len-g19", "category": "长度约束", "desc": "不超过 50 字（不计空白）", "prompt": "用不超过 50 个字回答：介绍黄河。（不要写长度数据）", "rules": [{"type": "max_chars", "n": 50}]}
+{"id": "len-g20", "category": "长度约束", "desc": "不超过 50 字（不计空白）", "prompt": "用不超过 50 个字回答：说明什么是 HTTP 状态码。（不要列举全部）", "rules": [{"type": "max_chars", "n": 50}]}
+{"id": "len-g21", "category": "长度约束", "desc": "不超过 60 字（不计空白）", "prompt": "用不超过 60 个字回答：解释什么是神经网络。（不要讲训练过程）", "rules": [{"type": "max_chars", "n": 60}]}
+{"id": "len-g22", "category": "长度约束", "desc": "不超过 60 字（不计空白）", "prompt": "用不超过 60 个字回答：介绍咖啡。（不要讲冲泡方法）", "rules": [{"type": "max_chars", "n": 60}]}
+{"id": "len-g23", "category": "长度约束", "desc": "不超过 60 字（不计空白）", "prompt": "用不超过 60 个字回答：说明什么是光合作用。（不要写化学式）", "rules": [{"type": "max_chars", "n": 60}]}
+{"id": "num-01", "category": "数值约束", "desc": "输出就是数字 56，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：7 乘 8 是多少？", "rules": [{"type": "numeric_eq", "n": 56}]}
+{"id": "num-02", "category": "数值约束", "desc": "输出就是数字 27，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：12 加 15 是多少？", "rules": [{"type": "numeric_eq", "n": 27}]}
+{"id": "num-03", "category": "数值约束", "desc": "输出就是数字 63，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：100 减 37 是多少？", "rules": [{"type": "numeric_eq", "n": 63}]}
+{"id": "num-04", "category": "数值约束", "desc": "输出就是数字 12，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：144 除以 12 是多少？", "rules": [{"type": "numeric_eq", "n": 12}]}
+{"id": "num-05", "category": "数值约束", "desc": "输出就是数字 1024，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：2 的 10 次方是多少？", "rules": [{"type": "numeric_eq", "n": 1024}]}
+{"id": "num-06", "category": "数值约束", "desc": "输出就是数字 55，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：从 1 加到 10 的和是多少？", "rules": [{"type": "numeric_eq", "n": 55}]}
+{"id": "num-07", "category": "数值约束", "desc": "输出就是数字 81，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：9 的平方是多少？", "rules": [{"type": "numeric_eq", "n": 81}]}
+{"id": "num-08", "category": "数值约束", "desc": "输出就是数字 12，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：一个正方体有多少条棱？", "rules": [{"type": "numeric_eq", "n": 12}]}
+{"id": "num-09", "category": "数值约束", "desc": "输出就是数字 12，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：一年有多少个月？", "rules": [{"type": "numeric_eq", "n": 12}]}
+{"id": "num-10", "category": "数值约束", "desc": "输出就是数字 168，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：一周有多少小时？", "rules": [{"type": "numeric_eq", "n": 168}]}
+{"id": "num-11", "category": "数值约束", "desc": "输出就是数字 30，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：半小时是多少分钟？", "rules": [{"type": "numeric_eq", "n": 30}]}
+{"id": "num-12", "category": "数值约束", "desc": "输出就是数字 6，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：3 的阶乘是多少？", "rules": [{"type": "numeric_eq", "n": 6}]}
+{"id": "num-13", "category": "数值约束", "desc": "输出就是数字 180，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：三角形内角和是多少度？", "rules": [{"type": "numeric_eq", "n": 180}]}
+{"id": "num-14", "category": "数值约束", "desc": "输出就是数字 29，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：闰年的二月有多少天？", "rules": [{"type": "numeric_eq", "n": 29}]}
+{"id": "num-15", "category": "数值约束", "desc": "输出就是数字 3，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：一个季度有几个月？", "rules": [{"type": "numeric_eq", "n": 3}]}
+{"id": "num-16", "category": "数值约束", "desc": "输出就是数字 125，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：1000 除以 8 是多少？", "rules": [{"type": "numeric_eq", "n": 125}]}
+{"id": "num-17", "category": "数值约束", "desc": "输出就是数字 169，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：13 的平方是多少？", "rules": [{"type": "numeric_eq", "n": 169}]}
+{"id": "num-18", "category": "数值约束", "desc": "输出就是数字 45，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：17 加 28 是多少？", "rules": [{"type": "numeric_eq", "n": 45}]}
+{"id": "num-19", "category": "数值约束", "desc": "输出就是数字 9，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：81 的平方根是多少？", "rules": [{"type": "numeric_eq", "n": 9}]}
+{"id": "num-20", "category": "数值约束", "desc": "输出就是数字 265，无单位无解释", "prompt": "只输出一个数字，不要单位、不要解释：365 减 100 是多少？", "rules": [{"type": "numeric_eq", "n": 265}]}
+{"id": "roman-01", "category": "数值约束", "desc": "输出就是 IX", "prompt": "用罗马数字表示 9，只输出罗马数字本身，不要任何其他内容。", "rules": [{"type": "equals_ci", "text": "IX"}]}
+{"id": "roman-02", "category": "数值约束", "desc": "输出就是 XL", "prompt": "用罗马数字表示 40，只输出罗马数字本身，不要任何其他内容。", "rules": [{"type": "equals_ci", "text": "XL"}]}
+{"id": "roman-03", "category": "数值约束", "desc": "输出就是 MMXXIV", "prompt": "用罗马数字表示 2024，只输出罗马数字本身，不要任何其他内容。", "rules": [{"type": "equals_ci", "text": "MMXXIV"}]}
+{"id": "code-square", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def square", "prompt": "只输出 Python 代码，不要解释：写一个函数 square(x)，返回 x 的平方。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def square"]}]}
+{"id": "code-is_even", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def is_even", "prompt": "只输出 Python 代码，不要解释：写一个函数 is_even(n)，判断 n 是否为偶数，返回布尔值。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def is_even"]}]}
+{"id": "code-max_of_two", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def max_of_two", "prompt": "只输出 Python 代码，不要解释：写一个函数 max_of_two(a, b)，返回两个数中较大的那个。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def max_of_two"]}]}
+{"id": "code-sum_list", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def sum_list", "prompt": "只输出 Python 代码，不要解释：写一个函数 sum_list(nums)，返回列表里所有数字的和。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def sum_list"]}]}
+{"id": "code-count_vowels", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def count_vowels", "prompt": "只输出 Python 代码，不要解释：写一个函数 count_vowels(s)，返回字符串里元音字母的个数。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def count_vowels"]}]}
+{"id": "code-factorial", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def factorial", "prompt": "只输出 Python 代码，不要解释：写一个函数 factorial(n)，返回 n 的阶乘。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def factorial"]}]}
+{"id": "code-fibonacci", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def fibonacci", "prompt": "只输出 Python 代码，不要解释：写一个函数 fibonacci(n)，返回斐波那契数列第 n 项。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def fibonacci"]}]}
+{"id": "code-to_upper", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def to_upper", "prompt": "只输出 Python 代码，不要解释：写一个函数 to_upper(s)，把字符串转成大写。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def to_upper"]}]}
+{"id": "code-abs_value", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def abs_value", "prompt": "只输出 Python 代码，不要解释：写一个函数 abs_value(x)，返回 x 的绝对值。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def abs_value"]}]}
+{"id": "code-min_of_three", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def min_of_three", "prompt": "只输出 Python 代码，不要解释：写一个函数 min_of_three(a, b, c)，返回三个数中最小的那个。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def min_of_three"]}]}
+{"id": "code-repeat_string", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def repeat_string", "prompt": "只输出 Python 代码，不要解释：写一个函数 repeat_string(s, n)，把字符串 s 重复 n 次。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def repeat_string"]}]}
+{"id": "code-list_length", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def list_length", "prompt": "只输出 Python 代码，不要解释：写一个函数 list_length(items)，返回列表长度。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def list_length"]}]}
+{"id": "code-first_element", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def first_element", "prompt": "只输出 Python 代码，不要解释：写一个函数 first_element(items)，返回列表第一个元素。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def first_element"]}]}
+{"id": "code-last_element", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def last_element", "prompt": "只输出 Python 代码，不要解释：写一个函数 last_element(items)，返回列表最后一个元素。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def last_element"]}]}
+{"id": "code-contains_word", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def contains_word", "prompt": "只输出 Python 代码，不要解释：写一个函数 contains_word(text, word)，判断 text 里是否包含 word。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def contains_word"]}]}
+{"id": "code-average", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def average", "prompt": "只输出 Python 代码，不要解释：写一个函数 average(nums)，返回列表的平均值。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def average"]}]}
+{"id": "code-double_all", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def double_all", "prompt": "只输出 Python 代码，不要解释：写一个函数 double_all(nums)，返回每个元素都乘 2 的新列表。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def double_all"]}]}
+{"id": "code-remove_duplicates", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def remove_duplicates", "prompt": "只输出 Python 代码，不要解释：写一个函数 remove_duplicates(items)，去掉列表里的重复元素。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def remove_duplicates"]}]}
+{"id": "code-is_palindrome", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def is_palindrome", "prompt": "只输出 Python 代码，不要解释：写一个函数 is_palindrome(s)，判断字符串是否为回文。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def is_palindrome"]}]}
+{"id": "code-celsius_to_fahrenheit", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def celsius_to_fahrenheit", "prompt": "只输出 Python 代码，不要解释：写一个函数 celsius_to_fahrenheit(c)，把摄氏度转成华氏度。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def celsius_to_fahrenheit"]}]}
+{"id": "code-gcd", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def gcd", "prompt": "只输出 Python 代码，不要解释：写一个函数 gcd(a, b)，返回两个数的最大公约数。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def gcd"]}]}
+{"id": "code-clamp", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def clamp", "prompt": "只输出 Python 代码，不要解释：写一个函数 clamp(x, lo, hi)，把 x 限制在 lo 和 hi 之间。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def clamp"]}]}
+{"id": "code-flatten", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def flatten", "prompt": "只输出 Python 代码，不要解释：写一个函数 flatten(matrix)，把二维列表摊平成一维。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def flatten"]}]}
+{"id": "code-char_count", "category": "代码约束", "desc": "可解析的 Python 代码，且包含 def char_count", "prompt": "只输出 Python 代码，不要解释：写一个函数 char_count(s)，返回字符串的长度。", "rules": [{"type": "python_code"}, {"type": "contains_all", "words": ["def char_count"]}]}
+{"id": "fmt-json-city", "category": "格式约束", "desc": "JSON 对象且含 city / population 两个键", "prompt": "只输出一个 JSON 对象，包含 city 和 population 两个字段，值分别是 \"Tokyo\" 和 37000000。不要任何其他文字。", "rules": [{"type": "json_object"}, {"type": "json_keys", "keys": ["city", "population"]}, {"type": "not_contains", "words": ["```"]}]}
+{"id": "fmt-json-ok", "category": "格式约束", "desc": "JSON 对象且含键 ok", "prompt": "只输出一个 JSON 对象，包含一个布尔字段 ok，值为 true。不要任何其他文字。", "rules": [{"type": "json_object"}, {"type": "json_keys", "keys": ["ok"]}, {"type": "not_contains", "words": ["```"]}]}
+{"id": "fmt-json-array", "category": "格式约束", "desc": "JSON 数组且长度为 3", "prompt": "只输出一个 JSON 数组，按顺序包含 1、2、3 三个数字。不要任何其他文字。", "rules": [{"type": "json_array", "n": 3}, {"type": "not_contains", "words": ["```"]}]}
+{"id": "fmt-json-colors", "category": "格式约束", "desc": "JSON 数组且长度为 3", "prompt": "只输出一个 JSON 数组，元素是 \"red\"、\"green\"、\"blue\" 三个字符串。不要任何其他文字。", "rules": [{"type": "json_array", "n": 3}, {"type": "not_contains", "words": ["```"]}]}
+{"id": "fmt-csv-3", "category": "格式约束", "desc": "英文逗号分隔且恰好 3 个字段", "prompt": "只输出三个值，用英文逗号分隔，不要空格、不要任何其他文字：a、b、c。", "rules": [{"type": "comma_fields", "n": 3}]}
+{"id": "fmt-csv-4", "category": "格式约束", "desc": "英文逗号分隔且恰好 4 个字段", "prompt": "只输出四个值，用英文逗号分隔，不要空格、不要任何其他文字：1、2、3、4。", "rules": [{"type": "comma_fields", "n": 4}]}
+{"id": "fmt-csv-weekdays", "category": "格式约束", "desc": "英文逗号分隔且恰好 5 个字段", "prompt": "只输出周一到周五的英文缩写，用英文逗号分隔，不要空格、不要任何其他文字。", "rules": [{"type": "comma_fields", "n": 5}]}
+{"id": "fmt-lower", "category": "格式约束", "desc": "输出全为小写英文字母", "prompt": "把 \"HELLO\" 转成小写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_lower"}]}
+{"id": "fmt-upper", "category": "格式约束", "desc": "输出全为大写英文字母", "prompt": "把 \"world\" 转成大写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_upper"}]}
+{"id": "fmt-upper-py", "category": "格式约束", "desc": "输出全为大写英文字母", "prompt": "把 \"python\" 转成大写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_upper"}]}
+{"id": "fmt-digits-4", "category": "格式约束", "desc": "输出恰好四位数字", "prompt": "只输出一个四位数，不要任何其他字符：1234。", "rules": [{"type": "regex_fullmatch", "pattern": "\\d{4}"}]}
+{"id": "fmt-date", "category": "格式约束", "desc": "输出 YYYY-MM-DD 格式", "prompt": "只输出一个 YYYY-MM-DD 格式的日期，表示 2026 年 3 月 5 日，不要任何其他字符。", "rules": [{"type": "regex_fullmatch", "pattern": "\\d{4}-\\d{2}-\\d{2}"}]}
+{"id": "fmt-time", "category": "格式约束", "desc": "输出 HH:MM 格式", "prompt": "用 HH:MM 的 24 小时格式表示下午三点整，只输出这个时间，不要任何其他字符。", "rules": [{"type": "regex_fullmatch", "pattern": "\\d{2}:\\d{2}"}]}
+{"id": "fmt-percent", "category": "格式约束", "desc": "输出百分数形式", "prompt": "把四分之一写成百分数，只输出结果本身（带 % 号），不要任何其他字符。", "rules": [{"type": "regex_fullmatch", "pattern": "\\d+(\\.\\d+)?%"}]}
+{"id": "fmt-hex", "category": "格式约束", "desc": "输出 0x 开头的小写十六进制", "prompt": "把十进制 255 写成小写十六进制，带 0x 前缀，只输出结果本身。", "rules": [{"type": "regex_fullmatch", "pattern": "0x[0-9a-f]+"}]}
+{"id": "fmt-quoted", "category": "格式约束", "desc": "输出被英文双引号包住的词", "prompt": "只输出被一对英文双引号包住的单词 hello，不要任何其他字符。", "rules": [{"type": "regex_fullmatch", "pattern": "\\\"[A-Za-z]+\\\""}]}
+{"id": "fmt-filename", "category": "格式约束", "desc": "输出小写文件名且以 .txt 结尾", "prompt": "给一个名为 note 的文本文件取文件名，只输出文件名本身，小写，以 .txt 结尾。", "rules": [{"type": "regex_fullmatch", "pattern": "[a-z0-9_]+\\.txt"}]}
+{"id": "fmt-one-word", "category": "格式约束", "desc": "恰好一个英文单词", "prompt": "只输出一个英文单词，表示「书」这个意思，不要任何其他内容。", "rules": [{"type": "word_count_eq", "n": 1}, {"type": "no_cjk"}]}
+{"id": "fmt-single-line", "category": "格式约束", "desc": "输出只有一行", "prompt": "只回答一行，不要换行：一年有多少个季节？", "rules": [{"type": "single_line"}]}
+{"id": "fmt-single-line-2", "category": "格式约束", "desc": "输出只有一行", "prompt": "只回答一行，不要换行：水在多少摄氏度结冰？", "rules": [{"type": "single_line"}]}
+{"id": "fmt-code-no-fence", "category": "格式约束", "desc": "Python 代码且无 ``` 围栏", "prompt": "只输出 Python 代码，不要 ``` 围栏、不要解释：写一个函数 square(x) 返回平方。", "rules": [{"type": "python_code"}, {"type": "not_contains", "words": ["```"]}]}
+{"id": "fmt-plain-one-line", "category": "格式约束", "desc": "无 Markdown 标记且只有一行", "prompt": "不要使用任何 Markdown 标记，只用一行纯文本回答：什么是 Git？", "rules": [{"type": "single_line"}, {"type": "not_contains", "words": ["#", "*", "`", ">"]}]}
+{"id": "struct-bullets-3", "category": "结构约束", "desc": "至少 3 行以「- 」开头", "prompt": "用三个要点说明如何保持健康，每个要点单独一行并以「- 」开头。", "rules": [{"type": "line_prefix_count", "prefix": "- ", "n": 3}]}
+{"id": "struct-bullets-4", "category": "结构约束", "desc": "至少 4 行以「- 」开头", "prompt": "用四个要点说明为什么要写单元测试，每行以「- 」开头。", "rules": [{"type": "line_prefix_count", "prefix": "- ", "n": 4}]}
+{"id": "struct-bullets-2", "category": "结构约束", "desc": "至少 2 行以「* 」开头", "prompt": "用两个要点说明咖啡的好处，每行以「* 」开头。", "rules": [{"type": "line_prefix_count", "prefix": "* ", "n": 2}]}
+{"id": "struct-numbered-3", "category": "结构约束", "desc": "1./2./3. 都在行首", "prompt": "用 1. 2. 3. 的编号形式列出三种运动，每行一个。", "rules": [{"type": "line_starts_with_all", "prefixes": ["1.", "2.", "3."]}]}
+{"id": "struct-numbered-4", "category": "结构约束", "desc": "1.~4. 都在行首", "prompt": "用 1. 2. 3. 4. 的编号形式列出四个季节，每行一个。", "rules": [{"type": "line_starts_with_all", "prefixes": ["1.", "2.", "3.", "4."]}]}
+{"id": "struct-numdot-2", "category": "结构约束", "desc": "1.2. 都在行首", "prompt": "用 1. 2. 的编号形式列出两种颜色，每行一个。", "rules": [{"type": "line_starts_with_all", "prefixes": ["1.", "2."]}]}
+{"id": "struct-lines-2", "category": "结构约束", "desc": "恰好 2 行", "prompt": "用恰好两行回答：你喜欢的季节和原因，每行一句话。", "rules": [{"type": "line_count_eq", "n": 2}]}
+{"id": "struct-lines-4", "category": "结构约束", "desc": "恰好 4 行", "prompt": "用恰好四行回答：列出四个方向，每行一个，不要有空行。", "rules": [{"type": "line_count_eq", "n": 4}]}
+{"id": "struct-lines-5", "category": "结构约束", "desc": "恰好 5 行", "prompt": "用恰好五行回答：列出五种颜色，每行一个，不要有空行。", "rules": [{"type": "line_count_eq", "n": 5}]}
+{"id": "struct-start-answer", "category": "结构约束", "desc": "第一行以「答案：」开头", "prompt": "回答的第一行必须以「答案：」开头，然后另起一行解释：1 加 1 等于几？", "rules": [{"type": "starts_with", "text": "答案："}]}
+{"id": "struct-start-conclusion", "category": "结构约束", "desc": "第一行以「结论：」开头", "prompt": "回答的第一行必须以「结论：」开头，然后再说明理由：Python 是解释型语言吗？", "rules": [{"type": "starts_with", "text": "结论："}]}
+{"id": "struct-start-no", "category": "结构约束", "desc": "第一行以「不是」开头", "prompt": "回答的第一行必须以「不是」开头，然后解释：地球是方的吗？", "rules": [{"type": "starts_with", "text": "不是"}]}
+{"id": "struct-end-thanks", "category": "结构约束", "desc": "以「谢谢」结尾", "prompt": "回答的最后必须以「谢谢」两个字结尾，后面不要有任何字符。问题：什么是函数？", "rules": [{"type": "ends_with", "text": "谢谢"}]}
+{"id": "struct-end-done", "category": "结构约束", "desc": "以 DONE 结尾", "prompt": "回答的最后必须以「DONE」结尾，后面不要有任何字符。问题：什么是循环？", "rules": [{"type": "ends_with", "text": "DONE"}]}
+{"id": "struct-end-bracket", "category": "结构约束", "desc": "以 ] 结尾", "prompt": "回答的最后必须以英文右方括号「]」结尾，后面不要有任何字符。问题：什么是数组？", "rules": [{"type": "ends_with", "text": "]"}]}
+{"id": "struct-quote-prefix", "category": "结构约束", "desc": "至少 2 行以「> 」开头", "prompt": "用引述格式写两句关于阅读的句子，每行以「> 」开头。", "rules": [{"type": "line_prefix_count", "prefix": "> ", "n": 2}]}
+{"id": "struct-marker-3", "category": "结构约束", "desc": "至少 3 行以「### 」开头", "prompt": "列出三个小标题，每行以「### 」开头。", "rules": [{"type": "line_prefix_count", "prefix": "### ", "n": 3}]}
+{"id": "struct-space-bullet", "category": "结构约束", "desc": "至少 3 行以「• 」开头", "prompt": "用三个圆点要点列出三种水果，每行以「• 」开头。", "rules": [{"type": "line_prefix_count", "prefix": "• ", "n": 3}]}
+{"id": "struct-lines-3-b", "category": "结构约束", "desc": "恰好 3 行", "prompt": "用恰好三行回答：什么时候该用列表、什么时候该用字典、什么时候该用集合，每行一句。", "rules": [{"type": "line_count_eq", "n": 3}]}
+{"id": "struct-start-first", "category": "结构约束", "desc": "第一行以「首先」开头", "prompt": "回答的第一行必须以「首先」两个字开头，然后继续说明如何学习编程。", "rules": [{"type": "starts_with", "text": "首先"}]}
+{"id": "lang-zh-1", "category": "语言约束", "desc": "不出现任何英文字母", "prompt": "只用中文回答，不要出现任何英文字母：介绍一下机器学习。", "rules": [{"type": "ascii_letters_max", "n": 0}]}
+{"id": "lang-zh-2", "category": "语言约束", "desc": "不出现任何英文字母", "prompt": "只用中文回答，不要出现任何英文字母：解释什么是操作系统。", "rules": [{"type": "ascii_letters_max", "n": 0}]}
+{"id": "lang-zh-3", "category": "语言约束", "desc": "不出现任何英文字母", "prompt": "只用中文回答，不要出现任何英文字母：介绍中国的四大发明。", "rules": [{"type": "ascii_letters_max", "n": 0}]}
+{"id": "lang-zh-4", "category": "语言约束", "desc": "不出现任何英文字母", "prompt": "只用中文回答，不要出现任何英文字母：说明为什么要喝水。", "rules": [{"type": "ascii_letters_max", "n": 0}]}
+{"id": "lang-zh-5", "category": "语言约束", "desc": "不出现任何英文字母", "prompt": "只用中文回答，不要出现任何英文字母：介绍一下大熊猫。", "rules": [{"type": "ascii_letters_max", "n": 0}]}
+{"id": "lang-en-1", "category": "语言约束", "desc": "不出现任何中日韩汉字", "prompt": "Answer in English only. Do not use any Chinese characters: what is a function.", "rules": [{"type": "no_cjk"}]}
+{"id": "lang-en-2", "category": "语言约束", "desc": "不出现任何中日韩汉字", "prompt": "Answer in English only. Do not use any Chinese characters: what is a database.", "rules": [{"type": "no_cjk"}]}
+{"id": "lang-en-3", "category": "语言约束", "desc": "不出现任何中日韩汉字", "prompt": "Answer in English only. Do not use any Chinese characters: what is an API.", "rules": [{"type": "no_cjk"}]}
+{"id": "lang-en-4", "category": "语言约束", "desc": "不出现任何中日韩汉字", "prompt": "Answer in English only. Do not use any Chinese characters: what is a compiler.", "rules": [{"type": "no_cjk"}]}
+{"id": "lang-en-5", "category": "语言约束", "desc": "不出现任何中日韩汉字", "prompt": "Answer in English only. Do not use any Chinese characters: what is an operating system.", "rules": [{"type": "no_cjk"}]}
+{"id": "lang-wc-1", "category": "语言约束", "desc": "恰好 3 个英文单词", "prompt": "Write exactly 3 words about the moon. Output only those words.", "rules": [{"type": "word_count_eq", "n": 3}]}
+{"id": "lang-wc-2", "category": "语言约束", "desc": "恰好 5 个英文单词", "prompt": "Write exactly 5 words about a cat. Output only those words.", "rules": [{"type": "word_count_eq", "n": 5}]}
+{"id": "lang-wc-3", "category": "语言约束", "desc": "恰好 7 个英文单词", "prompt": "Write exactly 7 words about winter. Output only those words.", "rules": [{"type": "word_count_eq", "n": 7}]}
+{"id": "lang-wc-4", "category": "语言约束", "desc": "恰好 10 个英文单词", "prompt": "Write exactly 10 words about the ocean. Output only those words.", "rules": [{"type": "word_count_eq", "n": 10}]}
+{"id": "lang-wc-5", "category": "语言约束", "desc": "恰好 4 个英文单词", "prompt": "Write exactly 4 words about coffee. Output only those words.", "rules": [{"type": "word_count_eq", "n": 4}]}
+{"id": "lang-upper-1", "category": "语言约束", "desc": "输出全为大写英文字母", "prompt": "把 \"hello world\" 全部转成大写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_upper"}]}
+{"id": "lang-upper-2", "category": "语言约束", "desc": "输出全为大写英文字母", "prompt": "把 \"machine learning\" 全部转成大写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_upper"}]}
+{"id": "lang-upper-3", "category": "语言约束", "desc": "输出全为大写英文字母", "prompt": "把 \"database\" 全部转成大写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_upper"}]}
+{"id": "lang-lower-1", "category": "语言约束", "desc": "输出全为小写英文字母", "prompt": "把 \"PYTHON\" 全部转成小写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_lower"}]}
+{"id": "lang-lower-2", "category": "语言约束", "desc": "输出全为小写英文字母", "prompt": "把 \"DATA\" 全部转成小写，只输出结果本身，不要任何其他字符。", "rules": [{"type": "all_lower"}]}
+{"id": "lang-cc-1", "category": "语言约束", "desc": "恰好 10 字（不计空白）", "prompt": "只用十个字说明什么是水。", "rules": [{"type": "char_count_eq", "n": 10}]}
+{"id": "lang-cc-2", "category": "语言约束", "desc": "恰好 20 字（不计空白）", "prompt": "用恰好二十个字介绍春天。", "rules": [{"type": "char_count_eq", "n": 20}]}
+{"id": "content-01", "category": "内容约束", "desc": "同时包含 苹果 / 香蕉 / 水果", "prompt": "用一句话同时提到「苹果」「香蕉」「水果」这三个词。", "rules": [{"type": "contains_all", "words": ["苹果", "香蕉", "水果"]}]}
+{"id": "content-02", "category": "内容约束", "desc": "同时包含 太阳 / 月亮 / 星球", "prompt": "用一句话同时提到「太阳」「月亮」「星球」这三个词。", "rules": [{"type": "contains_all", "words": ["太阳", "月亮", "星球"]}]}
+{"id": "content-03", "category": "内容约束", "desc": "同时包含 跑步 / 游泳 / 运动", "prompt": "用一句话同时提到「跑步」「游泳」「运动」这三个词。", "rules": [{"type": "contains_all", "words": ["跑步", "游泳", "运动"]}]}
+{"id": "content-04", "category": "内容约束", "desc": "同时包含 书 / 知识 / 学习", "prompt": "用一句话同时提到「书」「知识」「学习」这三个词。", "rules": [{"type": "contains_all", "words": ["书", "知识", "学习"]}]}
+{"id": "content-05", "category": "内容约束", "desc": "同时包含 咖啡 / 茶叶 / 饮品", "prompt": "用一句话同时提到「咖啡」「茶叶」「饮品」这三个词。", "rules": [{"type": "contains_all", "words": ["咖啡", "茶叶", "饮品"]}]}
+{"id": "content-06", "category": "内容约束", "desc": "同时包含 钢琴 / 吉他 / 乐器", "prompt": "用一句话同时提到「钢琴」「吉他」「乐器」这三个词。", "rules": [{"type": "contains_all", "words": ["钢琴", "吉他", "乐器"]}]}
+{"id": "content-07", "category": "内容约束", "desc": "同时包含 桌子 / 椅子 / 家具", "prompt": "用一句话同时提到「桌子」「椅子」「家具」这三个词。", "rules": [{"type": "contains_all", "words": ["桌子", "椅子", "家具"]}]}
+{"id": "content-08", "category": "内容约束", "desc": "同时包含 蜜蜂 / 蝴蝶 / 昆虫", "prompt": "用一句话同时提到「蜜蜂」「蝴蝶」「昆虫」这三个词。", "rules": [{"type": "contains_all", "words": ["蜜蜂", "蝴蝶", "昆虫"]}]}
+{"id": "content-09", "category": "内容约束", "desc": "同时包含 火车 / 飞机 / 交通", "prompt": "用一句话同时提到「火车」「飞机」「交通」这三个词。", "rules": [{"type": "contains_all", "words": ["火车", "飞机", "交通"]}]}
+{"id": "content-10", "category": "内容约束", "desc": "同时包含 雪山 / 大海 / 风景", "prompt": "用一句话同时提到「雪山」「大海」「风景」这三个词。", "rules": [{"type": "contains_all", "words": ["雪山", "大海", "风景"]}]}
+{"id": "content-11", "category": "内容约束", "desc": "同时包含 面包 / 米饭 / 主食", "prompt": "用一句话同时提到「面包」「米饭」「主食」这三个词。", "rules": [{"type": "contains_all", "words": ["面包", "米饭", "主食"]}]}
+{"id": "content-12", "category": "内容约束", "desc": "同时包含 医生 / 教师 / 职业", "prompt": "用一句话同时提到「医生」「教师」「职业」这三个词。", "rules": [{"type": "contains_all", "words": ["医生", "教师", "职业"]}]}
+{"id": "content-13", "category": "内容约束", "desc": "同时包含 春天 / 秋天 / 季节", "prompt": "用一句话同时提到「春天」「秋天」「季节」这三个词。", "rules": [{"type": "contains_all", "words": ["春天", "秋天", "季节"]}]}
+{"id": "content-14", "category": "内容约束", "desc": "同时包含 红色 / 蓝色 / 颜色", "prompt": "用一句话同时提到「红色」「蓝色」「颜色」这三个词。", "rules": [{"type": "contains_all", "words": ["红色", "蓝色", "颜色"]}]}
+{"id": "content-15", "category": "内容约束", "desc": "同时包含 鼠标 / 键盘 / 外设", "prompt": "用一句话同时提到「鼠标」「键盘」「外设」这三个词。", "rules": [{"type": "contains_all", "words": ["鼠标", "键盘", "外设"]}]}
+{"id": "content-16", "category": "内容约束", "desc": "同时包含 路由器 / 交换机 / 网络", "prompt": "用一句话同时提到「路由器」「交换机」「网络」这三个词。", "rules": [{"type": "contains_all", "words": ["路由器", "交换机", "网络"]}]}
+{"id": "content-17", "category": "内容约束", "desc": "同时包含 函数 / 变量 / 编程", "prompt": "用一句话同时提到「函数」「变量」「编程」这三个词。", "rules": [{"type": "contains_all", "words": ["函数", "变量", "编程"]}]}
+{"id": "content-18", "category": "内容约束", "desc": "同时包含 数据库 / 缓存 / 存储", "prompt": "用一句话同时提到「数据库」「缓存」「存储」这三个词。", "rules": [{"type": "contains_all", "words": ["数据库", "缓存", "存储"]}]}
+{"id": "content-19", "category": "内容约束", "desc": "同时包含 密码 / 指纹 / 安全", "prompt": "用一句话同时提到「密码」「指纹」「安全」这三个词。", "rules": [{"type": "contains_all", "words": ["密码", "指纹", "安全"]}]}
+{"id": "content-p1", "category": "内容约束", "desc": "同时包含 米饭 / 筷子", "prompt": "用一句话同时提到「米饭」「筷子」这两个词。", "rules": [{"type": "contains_all", "words": ["米饭", "筷子"]}]}
+{"id": "content-p2", "category": "内容约束", "desc": "同时包含 键盘 / 打字", "prompt": "用一句话同时提到「键盘」「打字」这两个词。", "rules": [{"type": "contains_all", "words": ["键盘", "打字"]}]}
+{"id": "content-p3", "category": "内容约束", "desc": "同时包含 地图 / 导航", "prompt": "用一句话同时提到「地图」「导航」这两个词。", "rules": [{"type": "contains_all", "words": ["地图", "导航"]}]}
+{"id": "content-p4", "category": "内容约束", "desc": "同时包含 电池 / 充电", "prompt": "用一句话同时提到「电池」「充电」这两个词。", "rules": [{"type": "contains_all", "words": ["电池", "充电"]}]}
+{"id": "content-p5", "category": "内容约束", "desc": "同时包含 雨伞 / 下雨", "prompt": "用一句话同时提到「雨伞」「下雨」这两个词。", "rules": [{"type": "contains_all", "words": ["雨伞", "下雨"]}]}
+{"id": "neg-01", "category": "禁忌词", "desc": "不得出现 很抱歉 / 非常抱歉", "prompt": "不要道歉，直接回答问题：什么是素数？", "rules": [{"type": "not_contains", "words": ["很抱歉", "非常抱歉"]}]}
+{"id": "neg-02", "category": "禁忌词", "desc": "不得出现 作为一个人工智能 / 作为AI助手", "prompt": "回答时不要出现「作为一个人工智能」这类说法。问题：什么是变量？", "rules": [{"type": "not_contains", "words": ["作为一个人工智能", "作为AI助手"]}]}
+{"id": "neg-03", "category": "禁忌词", "desc": "不得出现 首先 / 其次", "prompt": "回答中不要使用「首先」「其次」这样的序词。问题：如何学习编程？", "rules": [{"type": "not_contains", "words": ["首先", "其次"]}]}
+{"id": "neg-04", "category": "禁忌词", "desc": "不得出现 总之 / 综上所述", "prompt": "回答中不要使用「总之」「综上所述」。问题：什么是递归？", "rules": [{"type": "not_contains", "words": ["总之", "综上所述"]}]}
+{"id": "neg-05", "category": "禁忌词", "desc": "不得出现 值得注意的是", "prompt": "回答中不要使用「值得注意的是」。问题：什么是内存？", "rules": [{"type": "not_contains", "words": ["值得注意的是"]}]}
+{"id": "neg-06", "category": "禁忌词", "desc": "不得出现 希望这对你有帮助 / 希望对你有帮助", "prompt": "回答中不要出现「希望这对你有帮助」这类客套话。问题：什么是 Git 分支？", "rules": [{"type": "not_contains", "words": ["希望这对你有帮助", "希望对你有帮助"]}]}
+{"id": "neg-07", "category": "禁忌词", "desc": "不得出现 如有疑问 / 如有问题", "prompt": "回答中不要出现「如有疑问」这类结尾。问题：什么是索引？", "rules": [{"type": "not_contains", "words": ["如有疑问", "如有问题"]}]}
+{"id": "neg-08", "category": "禁忌词", "desc": "不得出现 毋庸置疑 / 显而易见", "prompt": "回答中不要使用「毋庸置疑」「显而易见」这类词。问题：为什么需要测试？", "rules": [{"type": "not_contains", "words": ["毋庸置疑", "显而易见"]}]}
+{"id": "neg-09", "category": "禁忌词", "desc": "不得出现 众所周知", "prompt": "回答中不要使用「众所周知」。问题：什么是熵？", "rules": [{"type": "not_contains", "words": ["众所周知"]}]}
+{"id": "neg-10", "category": "禁忌词", "desc": "不得出现 个人认为 / 我觉得", "prompt": "回答中不要出现「个人认为」「我觉得」。问题：Python 和 Java 有什么区别？", "rules": [{"type": "not_contains", "words": ["个人认为", "我觉得"]}]}
+{"id": "neg-11", "category": "禁忌词", "desc": "不得出现 总而言之", "prompt": "回答中不要使用「总而言之」。问题：什么是 HTTP 请求？", "rules": [{"type": "not_contains", "words": ["总而言之"]}]}
+{"id": "neg-12", "category": "禁忌词", "desc": "不得出现 让我们 / 我们来", "prompt": "回答中不要使用「让我们」「我们来」这类说法。问题：什么是排序算法？", "rules": [{"type": "not_contains", "words": ["让我们", "我们来"]}]}
+{"id": "neg-13", "category": "禁忌词", "desc": "不得出现 值得注意的是 / 需要注意的是", "prompt": "回答中不要使用「值得注意的是」「需要注意的是」。问题：什么是死锁？", "rules": [{"type": "not_contains", "words": ["值得注意的是", "需要注意的是"]}]}
+{"id": "neg-14", "category": "禁忌词", "desc": "不得出现 你可以 / 你可以试试", "prompt": "回答中不要出现「你可以试试」这类建议。问题：什么是缓存？", "rules": [{"type": "not_contains", "words": ["你可以", "你可以试试"]}]}
+{"id": "neg-15", "category": "禁忌词", "desc": "不得出现 祝你好运 / 祝你", "prompt": "回答中不要出现祝福语。问题：什么是编译原理？", "rules": [{"type": "not_contains", "words": ["祝你好运", "祝你"]}]}
+{"id": "neg-16", "category": "禁忌词", "desc": "不得出现 嗯 / 呃", "prompt": "回答中不要出现「嗯」「呃」这类语气词。问题：什么是数据结构？", "rules": [{"type": "not_contains", "words": ["嗯", "呃"]}]}
+{"id": "neg-17", "category": "禁忌词", "desc": "不得出现 ? / ？", "prompt": "回答结尾不要用问号，直接陈述。问题：什么是机器学习？", "rules": [{"type": "not_contains", "words": ["?", "？"]}]}
+{"id": "neg-18", "category": "禁忌词", "desc": "不得出现 ! / ！", "prompt": "回答中不要使用感叹号。问题：什么是深度学习？", "rules": [{"type": "not_contains", "words": ["!", "！"]}]}
+{"id": "neg-p1", "category": "禁忌词", "desc": "开头不得出现 以下是 / 下面", "prompt": "回答时不要以「以下是」或「下面」开头。问题：什么是数组？", "rules": [{"type": "no_prefix", "prefixes": ["以下是", "下面"]}]}
+{"id": "neg-p2", "category": "禁忌词", "desc": "开头不得出现 好的 / 当然", "prompt": "回答时不要以「好的」或「当然」开头。问题：什么是队列？", "rules": [{"type": "no_prefix", "prefixes": ["好的", "当然"]}]}
+{"id": "neg-p3", "category": "禁忌词", "desc": "开头不得出现 我", "prompt": "回答时不要以「我」字开头。问题：什么是栈？", "rules": [{"type": "no_prefix", "prefixes": ["我"]}]}
+{"id": "neg-p4", "category": "禁忌词", "desc": "开头不得出现 这是一个", "prompt": "回答时不要以「这是一个」开头。问题：什么是哈希表？", "rules": [{"type": "no_prefix", "prefixes": ["这是一个"]}]}

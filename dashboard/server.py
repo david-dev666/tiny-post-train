@@ -181,12 +181,31 @@ def _trainer_processes() -> dict:
 # ---------------------------------------------------------------- 接口
 
 
+REPORT_PATH = ROOT / "evals" / "results" / "report.html"
+
+
 @app.get("/")
 def index():
     page = STATIC_DIR / "index.html"
     if not page.exists():
         raise HTTPException(status_code=500, detail=f"缺少前端文件: {page}")
     return FileResponse(page)
+
+
+@app.get("/report")
+def report():
+    """模型评测报告。
+
+    报告是 make_report.py 生成的**自包含** HTML（图表是内联 SVG，不依赖 CDN），
+    挂在这条路由上就不用为了看它再起一个服务；手机上也直接用看板那套
+    公网地址 + 口令访问，路径换成 /report 即可。
+    """
+    if not REPORT_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="还没有报告。先跑：python scripts/eval_pipeline.py --run ...",
+        )
+    return FileResponse(REPORT_PATH)
 
 
 @app.get("/api/runs")

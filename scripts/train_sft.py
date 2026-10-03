@@ -8,30 +8,9 @@ import os
 import sys
 from pathlib import Path
 
-
-def _force_offline_for_local_model(argv) -> str:
-    """模型给的是本地目录时，把 HuggingFace hub 关掉。
-
-    必须在大件依赖 import 之前调用 —— huggingface_hub 是导入时读环境变量的。
-    不关的话，即使 --model 传的是本地路径，unsloth 仍会去 huggingface.co 查一次
-    元信息；国内机器连不上就无限重试，表现是「加载模型卡死」，很难看出问题在哪。
-
-    实测：同一份权重，不加这个 10 分钟不动，加了 2.3 秒载入。
-    """
-    for index, arg in enumerate(argv):
-        value = ""
-        if arg == "--model" and index + 1 < len(argv):
-            value = argv[index + 1]
-        elif arg.startswith("--model="):
-            value = arg.split("=", 1)[1]
-        if value and Path(value).expanduser().is_dir():
-            os.environ.setdefault("HF_HUB_OFFLINE", "1")
-            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-            return value
-    return ""
-
-
-LOCAL_MODEL_PATH = _force_offline_for_local_model(sys.argv)
+# 本地权重强制离线。实现移到 offline.py —— eval.py 也要用同一份，
+# 而它在 vllm 环境里 import 不了本模块（下面 import unsloth 会失败）。
+from offline import LOCAL_MODEL_PATH  # noqa: E402
 
 import argparse  # noqa: E402
 import dataclasses  # noqa: E402
@@ -46,12 +25,29 @@ from transformers import TrainerCallback  # noqa: E402
 from trl import SFTConfig, SFTTrainer  # noqa: E402
 from unsloth import FastLanguageModel  # noqa: E402
 
-FALLBACK_CHAT_TEMPLATE = (
+# 退化指标（复读率/多样性）的唯一实现在纯模块里，离线评测也要用同一份
+from metrics import repetition_metrics  # noqa: E402
+
+# 固定使用的干净模板。**不要改回 tokenizer 自带的那个。**
+#
+# tokenizer 自带的是 Qwen3 **instruct** 版模板，它会把每个 assistant 回复渲染成：
+#     <|im_start|>assistant\n<think>\n\n</think>\n\n{回答}<|im_end|>\n
+# 而推理时 add_generation_prompt=True 只给到 `<|im_start|>assistant\n`，**不预填**
+# 那个思考块，于是模型必须自己"生成"它 —— 实测生成出来的是两个异常字节
+# （token 124 = 裸字节 0xC0），decode 成乱码，挂在每次输出的最前面。
+#
+# 后果实测：20 条指令遵循里 8 条被这段乱码判错；probes 的复读率不可比；
+# MMLU 的 logits 判分被污染。而且 base 模型本来没有思考能力，
+# 教它输出一个空的思考块纯属浪费容量。
+CLEAN_CHAT_TEMPLATE = (
     "{% for m in messages %}"
     "<|im_start|>{{ m['role'] }}\n{{ m['content'] }}<|im_end|>\n"
     "{% endfor %}"
     "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
 )
+
+# 兼容旧名字（eval.py 之前 import 的是这个）
+FALLBACK_CHAT_TEMPLATE = CLEAN_CHAT_TEMPLATE
 
 # 推理采样的固定问题。别改，改了就没法和之前步数对比了。
 PROBE_PROMPTS = [
@@ -59,6 +55,28 @@ PROBE_PROMPTS = [
     "用一句话解释什么是 LoRA",
     "写一个 Python 函数，判断一个数是不是质数",
 ]
+
+
+def stop_token_ids(tokenizer) -> list[int]:
+    """生成时要认的停止符。
+
+    **必须带上 `<|im_end|>`。** chat 模板里每个回合都以它结尾，模型学会的就是
+    用它结束回答；但它**不在** tokenizer / model 的 eos 里（那是 `<|endoftext|>`）。
+    不带上，生成就不会在那里停 —— 模型「说完了还在硬说」，
+    实测每条输出末尾多出一段乱码（`לחלוט` / `NdrFc` / `аци`），
+    把指令遵循的判分整片带偏：答案都对，被尾巴判错。
+
+    实测影响：MMLU 那题输出 `9. לחלוט`（本该是 `9.`）、代码题把合法 Python
+    变成非法、`END` 结尾题因为尾巴而不算结尾。
+    """
+    vocab = tokenizer.get_vocab()
+    ids = []
+    for name in ("<|im_end|>", "<|endoftext|>"):
+        if name in vocab:
+            ids.append(vocab[name])
+    if tokenizer.eos_token_id is not None and tokenizer.eos_token_id not in ids:
+        ids.append(tokenizer.eos_token_id)
+    return ids
 
 
 class MetricsLogger(TrainerCallback):
@@ -163,6 +181,7 @@ class ProbeCallback(TrainerCallback):
                         max_new_tokens=self.max_new_tokens,
                         do_sample=False,
                         pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                        eos_token_id=stop_token_ids(tokenizer),
                     )
                 answer = tokenizer.decode(
                     output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
@@ -174,7 +193,7 @@ class ProbeCallback(TrainerCallback):
                         "prompt": prompt,
                         "output": answer.strip(),
                         "sec": round(time.time() - started, 2),
-                        **self._score(output[0][inputs["input_ids"].shape[1]:]),
+                        **self.score(output[0][inputs["input_ids"].shape[1]:]),
                     }
                 )
         finally:
@@ -183,29 +202,16 @@ class ProbeCallback(TrainerCallback):
         return records
 
     @staticmethod
-    def _score(generated_ids) -> dict:
+    def score(generated_ids) -> dict:
         """对生成结果打客观分。
 
-        故意不算 ROUGE / BLEU：这三个问题都是开放式的，没有唯一正确答案，
-        硬套一个参考答案算出来的分数看着精确、其实没有意义，容易误导。
+        **实现只剩一份**，在 `metrics.repetition_metrics`。原先这个方法自带一份，
+        换 vLLM 引擎后 `eval.py` 要在 vllm 环境里跑（那环境装不了 unsloth），
+        只能把实现下沉到纯模块 —— 顺手消掉了「训练曲线与离线评测各写一份」的隐患。
 
-        能算的是「退化信号」——模型崩坏时最典型的表现是复读和长度失控：
-          repeat_2gram   重复的 2-gram 占比，越高越像复读机
-          distinct_ratio 不同 token 占比，越低越单调
-          tokens         生成长度，突然暴涨/暴跌都是异常
+        指标含义见 `metrics.repetition_metrics` 的说明。
         """
-        ids = [int(t) for t in generated_ids]
-        n = len(ids)
-        if n == 0:
-            return {"tokens": 0, "repeat_2gram": 0.0, "distinct_ratio": 0.0}
-
-        grams = [tuple(ids[i : i + 2]) for i in range(n - 1)]
-        repeat = 1 - len(set(grams)) / len(grams) if grams else 0.0
-        return {
-            "tokens": n,
-            "repeat_2gram": round(repeat, 4),
-            "distinct_ratio": round(len(set(ids)) / n, 4),
-        }
+        return repetition_metrics(generated_ids)
 
 
 LETTERS = ("A", "B", "C", "D")
@@ -285,7 +291,7 @@ class BenchCallback(TrainerCallback):
         if step <= 0 or step % self.every != 0:
             return
         try:
-            result = self._evaluate(model, processing_class, step)
+            result = self.evaluate(model, processing_class, step)
         except Exception as exc:  # noqa: BLE001 —— 评测失败绝不能影响训练
             self.disabled = True
             print(f"[BenchCallback] 评测失败，已自动停用：{exc!r}")
@@ -300,7 +306,8 @@ class BenchCallback(TrainerCallback):
             f"（{result['sec']}s，随机基准 25%）"
         )
 
-    def _evaluate(self, model, tokenizer, step) -> dict:
+    def evaluate(self, model, tokenizer, step) -> dict:
+        """公开给 scripts/eval.py 用，保证离线评测和训练曲线是同一套判分口径。"""
         was_training = model.training
         saved_padding = tokenizer.padding_side
         # 取最后一个位置的 logits，所以必须左填充，否则末位是 pad
@@ -394,6 +401,8 @@ def parse_args():
     p.add_argument("--bench-file", default=None,
                    help="评测结果路径，默认 <output>/bench.jsonl")
     p.add_argument("--bench-batch-size", type=int, default=16)
+    p.add_argument("--tokenizer-chat-template", action="store_true",
+                   help="退回 tokenizer 自带模板（默认用项目内置的干净模板，见 CLEAN_CHAT_TEMPLATE 注释）")
     return p.parse_args()
 
 
@@ -538,7 +547,13 @@ def main():
         load_in_4bit=args.load_in_4bit,
     )
 
-    chat_template = getattr(tokenizer, "chat_template", None) or FALLBACK_CHAT_TEMPLATE
+    if args.tokenizer_chat_template:
+        chat_template = getattr(tokenizer, "chat_template", None) or CLEAN_CHAT_TEMPLATE
+        print("!! 使用 tokenizer 自带模板。Qwen3 instruct 模板会注入 <think> 空块，")
+        print("   推理时那段会变成乱码挂在输出最前面，只在你明确知道后果时用。")
+    else:
+        chat_template = CLEAN_CHAT_TEMPLATE
+        print("模板：使用项目内置的干净模板（不含 <think> 空块）")
     tokenizer.chat_template = chat_template
 
     model = FastLanguageModel.get_peft_model(

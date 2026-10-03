@@ -60,9 +60,14 @@ python scripts/train_sft.py \
 python scripts/train_sft.py \
   --model weights/Qwen3-4B-Base \
   --data data/raw/alpaca-gpt4-zh \
-  --output outputs/sft-4b \
-  --num-epochs 2
+  --output outputs/sft-4b-v2 \
+  --lora-r 32 --lr 2e-4 --num-epochs 1 \
+  --batch-size 4 --grad-accum 4 --max-seq-len 2048
 ```
+
+**`--num-epochs 1`，别照抄成 2。** 这是实测结论不是省事：跑 2 epoch 时 eval loss
+在约 step 2900（≈1 epoch 处）触底就走平了，**第二个 epoch 是白跑**，
+白烧 1.3 GPU 小时（2.4 h vs 1.1 h）。
 
 显存不够就把 `--batch-size` 降到 1，把 `--grad-accum` 提到 16。
 

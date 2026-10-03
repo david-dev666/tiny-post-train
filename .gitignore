@@ -11,6 +11,13 @@ wandb/
 evals/*.json
 evals/*.log
 
+# 评测产物。结果 json 存了每题的生成原文（判分能离线重放的前提），
+# 但一份约 9MB，三份就 27MB —— 不进版本库。
+# report.html 只有 25KB 且能 diff，保留。
+# archive/ 是被换掉的旧推理引擎的结果，只作本地存档。
+evals/results/*.json
+evals/archive/
+
 # 数据
 data/raw/*
 !data/raw/.gitkeep
