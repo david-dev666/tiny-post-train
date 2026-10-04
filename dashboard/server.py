@@ -11,7 +11,7 @@
         ssh -N -L 8000:localhost:8000 autodl
     然后浏览器打开 http://localhost:8000
 
-数据来源（由 scripts/train_sft.py 的 MetricsLogger 写出）：
+数据来源（由训练脚本的 MetricsLogger 写出，SFT 和 DPO 都是同一套）：
     outputs/<run>/metrics.jsonl    每行一条指标，追加写
     outputs/<run>/run_meta.json    训练开始的元信息（总步数、起跑时间等）
 """
@@ -147,7 +147,7 @@ def _gpu_info() -> dict:
 
 
 def _run_from_cmdline(procs: list[str]) -> str | None:
-    """从 train_sft.py 的命令行里抠出 --output 指向的 run 名。
+    """从训练进程的命令行里抠出 `--output` 指向的 run 名。
 
     看板是「一个 run 一个视图」，但训练进程是整机唯一的。
     知道进程在写哪个 run，前端才能区分「这个 run 在跑」和「别的 run 在跑」。
@@ -165,16 +165,35 @@ def _run_from_cmdline(procs: list[str]) -> str | None:
                 return Path(parts[i + 1]).name
             if part.startswith("--output="):
                 return Path(part.split("=", 1)[1]).name
+        # --export-merged 那次不带 --output，不算训练
+        if "--export-merged" in parts:
+            return None
     return None
 
 
+# 会写 `metrics.jsonl` / `run_meta.json` 的训练脚本。看板靠它判「现在有没有在训」。
+#
+# ⚠️ 加新训练脚本时**必须补进来**。原来这里只写死了 `train_sft.py`，
+# 于是 DPO 训练（`train_dpo.py`）跑着的时候看板报 `alive: false` ——
+# 曲线在动、GPU 在转，看板却说「没运行」，很容易让人以为任务挂了。
+TRAINER_SCRIPTS = ("train_sft.py", "train_dpo.py")
+
+
 def _trainer_processes() -> dict:
-    """看看还有没有在跑的 train_sft.py，以及它在写哪个 run。"""
+    """看看有没有在跑的训练进程，以及它在写哪个 run。"""
     try:
-        proc = subprocess.run(["pgrep", "-af", "train_sft.py"], capture_output=True, text=True, timeout=5)
+        proc = subprocess.run(
+            ["pgrep", "-af", "|".join(TRAINER_SCRIPTS)],
+            capture_output=True, text=True, timeout=5,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return {"alive": False, "procs": [], "run": None}
-    procs = [line for line in proc.stdout.strip().splitlines() if line]
+    # pgrep 的 pattern 是扩展正则，`|` 能匹配多个；但它也会命中打包进程
+    # （`bash scripts/run_dpo.sh train` 这类），所以按脚本名再滤一遍
+    procs = [
+        line for line in proc.stdout.strip().splitlines()
+        if line and any(s in line for s in TRAINER_SCRIPTS)
+    ]
     return {"alive": bool(procs), "procs": [p[:200] for p in procs[:5]], "run": _run_from_cmdline(procs)}
 
 

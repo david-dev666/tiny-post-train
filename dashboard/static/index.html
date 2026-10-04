@@ -271,13 +271,13 @@ function renderCards(gpu, trainer) {
   const trainerRun = (trainer && trainer.run) || null;
   const runningThisRun = !!(trainer && trainer.alive && trainerRun === state.run);
   if (runningThisRun) {
-    cards.push(card("训练进程", "运行中", "train_sft.py 存活", "ok"));
+    cards.push(card("训练进程", "运行中", "训练脚本存活", "ok"));
   } else if (trainer && trainer.alive && trainerRun) {
     cards.push(card("训练进程", "本 run 未运行", `整机正在训 ${trainerRun}`, "warn"));
   } else if (trainer && trainer.alive) {
-    cards.push(card("训练进程", "运行中", "train_sft.py 存活（run 未识别）", "ok"));
+    cards.push(card("训练进程", "运行中", "训练脚本存活（run 未识别）", "ok"));
   } else {
-    cards.push(card("训练进程", "未运行", "没检测到 train_sft.py", "warn"));
+    cards.push(card("训练进程", "未运行", "没检测到训练脚本", "warn"));
   }
 
   // 步数

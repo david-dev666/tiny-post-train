@@ -11,7 +11,7 @@ Qwen3-4B 的后训练全流程开源项目：SFT -> DPO -> GRPO -> 评测 -> 部
 | 阶段 | 方法 | 脚本 | 状态 |
 | --- | --- | --- | --- |
 | 0 | 环境搭建 | scripts/setup_env.sh | 可用 |
-| 1 | SFT 监督微调 | scripts/train_sft.py | 已跑通（4B / LoRA r=32 / 1 epoch，约 1.1 GPU 小时） |
+| 1 | SFT 监督微调 | scripts/train_sft.py | 已跑通（**v3**：4B / LoRA r=32 / 1 epoch，约 1.4 GPU 小时；修掉了 v2 的收尾乱码，见下） |
 | 2 | DPO 偏好对齐 | scripts/train_dpo.py | 未实现 |
 | 3 | GRPO 可验证奖励强化 | scripts/train_grpo.py | 未实现 |
 | 4 | 评测 | scripts/eval.py | 可用（5 套评测 + 置信区间 + 可切换推理引擎） |
@@ -21,6 +21,26 @@ Qwen3-4B 的后训练全流程开源项目：SFT -> DPO -> GRPO -> 评测 -> 部
 | 辅助 | 评测报告 | scripts/make_report.py | 可用（自包含 HTML，零外部依赖） |
 | 辅助 | 离线重判 | scripts/rescore.py | 可用（改判分口径不必重跑模型） |
 | 辅助 | 判分回归测试 | tests/test_scoring.py | 可用（34 条，不依赖 GPU） |
+
+### SFT：v2 → v3（修掉收尾乱码）
+
+v2 的输出在回合结束前会多吐一个乱码 token（希伯来语词 `לחלוט`、残缺字节 `\ufffd\ufffd取` 这类）。
+**只要模型自己决定收尾，就几乎必吐**：自训 SFT 是 **86~93%**，而 base 只有 0~2.5%、
+官方 instruct 是 **0.0%** —— 也就是这个毛病是自训 SFT 自己引入的。
+
+v3 从 Base 重训，数据 / lr / rank / epoch 全部与 v2 相同，**只改了两处**：
+
+| | v2 | **v3** |
+| --- | --- | --- |
+| `lora_alpha` | 32（= r） | **64（= 2r）** |
+| 停止符 | `tokenizer.eos_token` 是 `<|endoftext|>`，TRL 因此给**每条样本末尾追加**它 | **`eos` 指向 `<|im_end|>`**，样本末尾停在 `<|im_end|>`、不再追加 |
+
+第二条是关键。训练数据教的是 `<|im_end|>`，而 `tokenizer.eos_token` 是 `<|endoftext|>` ——
+**两者不是同一个 token**。不对齐时训练目标会变成「回答 → `<|im_end|>` → `\n` → `<|endoftext|>`」，
+而推理在 `<|im_end|>` 就停：模型被要求在末尾学一个**推理时永远不会用到**的 token，
+真正要预测的那个停止符反而没被教准。
+
+实测（固定问题、只统计**模型自己决定收尾**的样本）：v2 乱码尾 86~93%，**v3 为 0**。
 
 ## 实验设计
 

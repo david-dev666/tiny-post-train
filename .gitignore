@@ -16,6 +16,8 @@ evals/*.log
 # report.html 只有 25KB 且能 diff，保留。
 # archive/ 是被换掉的旧推理引擎的结果，只作本地存档。
 evals/results/*.json
+# 探针结果（换解码参数的对照实验）—— 不是评测结果，单独放
+evals/probes/
 evals/archive/
 
 # 数据

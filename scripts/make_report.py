@@ -44,7 +44,14 @@ PALETTE = ["#4c8dff", "#3fb950", "#e3b341", "#db61a2", "#a371f7", "#39c5cf"]
 
 
 def load_results(directory: Path) -> list[dict]:
-    """读结果目录。judge-*.json 是裁判结果，单独处理。"""
+    """读结果目录。judge-*.json 是裁判结果，单独处理。
+
+    **探针一律不读**（`kind == "probe"`，由 `eval.py --probe` 打在 json 里）。
+    探针是「换了解码参数」的对照实验，不是模型评测 —— 摆进同一张表会被读成
+    「模型之间的差异」，而这正是本项目最忌讳的那种错（看不出来，因为不报错）。
+    探针跑完写在 `evals/probes/`，一般根本不会出现在这个目录里；
+    这里再拦一道是防它被手工挪进来。
+    """
     results = []
     for path in sorted(directory.glob("*.json")):
         if path.name.startswith("judge-"):
@@ -55,6 +62,9 @@ def load_results(directory: Path) -> list[dict]:
             print(f"  跳过 {path.name}：{exc}")
             continue
         if "label" not in data:
+            continue
+        if data.get("kind") == "probe":
+            print(f"  跳过 {path.name}：探针（换解码参数的对照实验），不进评测表")
             continue
         data["_file"] = path.name
         # 带 --limit 的是「截断跑」。**不能直接从表里排除** ——

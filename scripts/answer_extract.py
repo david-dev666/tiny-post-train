@@ -207,7 +207,12 @@ def trailing_junk_len(tokenizer, ids, max_scan: int = 4) -> int:
     total = len(ids)
 
     def piece(index: int) -> str:
-        return tokenizer.decode([ids[index]], skip_special_tokens=False)
+        # skip_special_tokens=True 有两层用处，都不能省：
+        #  1) 兜住「ids 里还带着停止符」的情况。vLLM 的 token_ids 是带的
+        #     （已在 engines.strip_stop_tokens 里裁掉，但不保证每个调用方都裁过）——
+        #     不跳过它就等于把停止符当成「最后那个 token」，永远判不出乱码
+        #  2) 尾部的换行 / 空格要跟着乱码一起剪掉
+        return tokenizer.decode([ids[index]], skip_special_tokens=True)
 
     # 1) 从尾部跳过纯空白，定位最后一个「有内容」的 token
     last = total - 1

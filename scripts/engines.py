@@ -74,6 +74,29 @@ class GenOut:
     hit_cap: bool
 
 
+def strip_stop_tokens(ids: list[int], stop_ids) -> list[int]:
+    """去掉末尾的停止符，让 `GenOut.ids` 兑现上面那句「已按停止符截断」。
+
+    **这个函数存在是因为两个引擎曾经口径不一致**：HF 那边一开始就在第一个
+    停止符处截断（`HFEngine.run`），而 vLLM 的 `completion.token_ids`
+    **是把停止符带在里面的**（实测 id=151643 `<|endoftext|>`）——
+    `engines.py` 里的注释甚至把它写反了（「不含停止符」），害人不浅。
+
+    差这一个 token 的后果不是四舍五入，是**整套诊断静默归零**：
+    `tokens` 字段多一个、复读率偏一点、最要命的是乱码尾判定 ——
+    它会把这个停止符当成「最后那个 token」，于是永远判不出末尾的乱码，
+    `junk_tail` 恒为 0、`passed_junk_trimmed` 等于主分数，
+    看起来一切正常，实际上什么都没量到。
+
+    改的是 **id 序列**，不动 text —— text 本来就由 `skip_special_tokens=True`
+    解出来，没有停止符。
+    """
+    stop = set(stop_ids)
+    while ids and ids[-1] in stop:
+        ids.pop()
+    return ids
+
+
 class BaseEngine:
     name = "base"
 
@@ -184,7 +207,6 @@ class VLLMEngine(BaseEngine):
         enforce_eager: bool = True,
         enable_prefix_caching: bool = False,
         max_lora_rank: int = 64,
-        ban_token_ids: tuple[int, ...] = (),
     ) -> None:
         import vllm
         from transformers import AutoTokenizer
@@ -214,11 +236,6 @@ class VLLMEngine(BaseEngine):
         # eval.py 决定（可能要覆盖成项目内置的干净模板），不能让引擎偷偷换一套。
         self.tokenizer = AutoTokenizer.from_pretrained(model_ref)
         self.stop_ids = P.stop_token_ids(self.tokenizer)
-        # 「上界探针」用：直接把已知的乱码 token 禁掉，量一量「只修这一个毛病」
-        # 到底值多少分。**不是修复方案** —— 硬禁只能挡住已经见过的 id，
-        # 模型换个没见过的乱码 token 照样吐（实测就有希伯来语词、阿拉伯语、
-        # 字节残缺三种形态）。真正的修法是让模型自己学会干净收尾（DPO）。
-        self.ban_token_ids = tuple(int(t) for t in ban_token_ids)
         super().__init__()
         self.config.update({
             "backend": "vllm.LLM.generate",
@@ -230,9 +247,6 @@ class VLLMEngine(BaseEngine):
             "enforce_eager": enforce_eager,
             "enable_prefix_caching": enable_prefix_caching,
             "lora": adapter,
-            # 探针配置必须落盘：带禁用和不带禁用是两把尺子，
-            # 不记下来事后看到两份不同的 json 只能猜（这个坑踩过一次）
-            "ban_token_ids": list(self.ban_token_ids),
         })
 
     def run(self, prompts: list[str], max_new_tokens: int, on_progress=None) -> list[GenOut]:
@@ -244,8 +258,6 @@ class VLLMEngine(BaseEngine):
             max_tokens=max_new_tokens,
             stop_token_ids=self.stop_ids,
             skip_special_tokens=True,
-            # logit_bias 给 -100 等于禁掉该 token（只在开了 --ban-token-ids 时才非空）
-            logit_bias={t: -100.0 for t in self.ban_token_ids} or None,
         )
         outputs = self.llm.generate(
             prompts, params, lora_request=self.lora_request, use_tqdm=False,
@@ -253,11 +265,13 @@ class VLLMEngine(BaseEngine):
         results = []
         for out in outputs:
             completion = out.outputs[0]
-            ids = [int(t) for t in completion.token_ids]
+            # vLLM 的 token_ids **含**停止符，必须去掉 —— 见 strip_stop_tokens 的说明
+            ids = strip_stop_tokens([int(t) for t in completion.token_ids], self.stop_ids)
             results.append(GenOut(
                 text=completion.text.strip(),
                 ids=ids,
-                # vLLM 的 token_ids **不含**停止符，所以「用满预算」就是 finish_reason=length
+                # 「用满预算」直接看 finish_reason，别用 `len(ids) >= max_new_tokens`
+                # 反推 —— 那要依赖 ids 里有没有停止符，正是上面刚踩过的坑
                 hit_cap=completion.finish_reason == "length",
             ))
         BaseEngine._tick(on_progress, len(prompts), len(prompts))

@@ -133,18 +133,29 @@ case("检出替换字符+真汉字", has_junk_tail("#### 数字：14.��取")
 # 前两个无效字节解成 U+FFFD、后三个字节解成「取」）。文本层看它「以正常汉字
 # 收尾」，`[乱码字符]+$` 匹配不到 —— 既漏判也剪不干净。只有回头看 token 才准。
 class _FakeTokenizer:
-    """id → 字符串直接查表，够 trailing_junk_len 用。不需要真模型。"""
+    """id → 字符串直接查表，够 trailing_junk_len 用。不需要真模型。
 
-    def __init__(self, table: dict[int, str]):
+    `special` 里的 id 在 `skip_special_tokens=True` 时解成空串 ——
+    真 tokenizer 就是这样的（`<|endoftext|>` → `""`），而这正是
+    「ids 里带着停止符」那个坑能被兜住的原因。
+    """
+
+    def __init__(self, table: dict[int, str], special: tuple[int, ...] = ()):
         self.table = table
+        self.special = set(special)
 
     def decode(self, ids, skip_special_tokens: bool = True) -> str:
-        return "".join(self.table[int(i)] for i in ids)
+        return "".join(
+            "" if (skip_special_tokens and int(i) in self.special) else self.table[int(i)]
+            for i in ids
+        )
 
 
-_tok = _FakeTokenizer({
-    0: "你好", 1: "，世界", 2: " לחלוט", 3: " ", 4: "��取", 5: "。", 6: " פייסב",
-})
+_tok = _FakeTokenizer(
+    {0: "你好", 1: "，世界", 2: " לחלוט", 3: " ", 4: "��取", 5: "。", 6: " פייסב",
+     7: "<|endoftext|>"},
+    special=(7,),
+)
 
 case("token 层：干净收尾不剪", trailing_junk_len(_tok, [0, 1, 5]), 0)
 case("token 层：希伯来乱码剪 1 个", trailing_junk_len(_tok, [0, 1, 2]), 1)
@@ -160,6 +171,16 @@ case("token 层：连续两个乱码", trailing_junk_len(_tok, [0, 1, 2, 6]), 2)
 case("token 层：max_scan 上限", trailing_junk_len(_tok, [2, 6, 2, 6, 2, 6], max_scan=4), 4)
 case("token 层：空序列", trailing_junk_len(_tok, []), 0)
 case("token 层：全是空白", trailing_junk_len(_tok, [3, 3]), 0)
+
+# 关键回归：**ids 里带着停止符**。
+# vLLM 的 completion.token_ids 是带停止符的（实测 id=151643 '<|endoftext|>'），
+# 而 HF 那边我们已经在第一个停止符处截断 —— 两个引擎口径不一致，差一个 token。
+# 不跳过它，函数会把停止符当成「最后那个 token」，于是**永远判不出乱码**：
+# junk_tail 恒为 0、passed_junk_trimmed 等于主分数，看起来一切正常，
+# 实际上整套诊断什么都没量到。真实序列就是 [内容, 乱码, '\n', 停止符]。
+case("token 层：ids 带停止符也能判出乱码", trailing_junk_len(_tok, [0, 1, 2, 7]), 2)
+case("token 层：乱码+换行+停止符一起剪", trailing_junk_len(_tok, [0, 1, 2, 3, 7]), 3)
+case("token 层：只有停止符、没有乱码 → 不剪", trailing_junk_len(_tok, [0, 1, 5, 7]), 0)
 
 
 # ============================================================ DPO 偏好数据构造
@@ -185,15 +206,23 @@ case("DPO：截断的题丢掉（那里没有收尾决策）", _stats["截断（
 case("DPO：干净收尾的题丢掉", _stats["干净收尾（丢弃）"], 1)
 case("DPO：整条都是乱码的丢掉", _stats["剪完是空的（丢弃）"], 1)
 case("DPO：留下 3 对", _stats["保留"], 3)
-case("DPO：chosen 就是剪掉乱码那一份", [p["chosen"] for p in _pairs], ["1024."] * 3)
+case("DPO：chosen 就是剪掉乱码那一份", [p["chosen"] for p in _pairs], ["1024.<|im_end|>"] * 3)
 # 关键回归：`��取` 在文本层看着「以正常汉字收尾」，正则剪不掉；必须按 token 剪
-case("DPO：U+FFFD 型乱码也剪得掉", _pairs[1]["chosen"], "1024.")
-case("DPO：乱码+尾空白一起剪，不留尾空格", _pairs[2]["chosen"], "1024.")
+case("DPO：U+FFFD 型乱码也剪得掉", _pairs[1]["chosen"], "1024.<|im_end|>")
+case("DPO：乱码+尾空白一起剪，不留尾空格", _pairs[2]["chosen"], "1024.<|im_end|>")
+# 🔴 最要紧的一条：chosen 必须**显式**以 <|im_end|> 收尾。
+# 绝不能指望 tokenizer 的 eos_token_id —— 那是 151643 <|endoftext|>，在收尾位置
+# 排第 8958 名（≈0），而训练数据教的是 151645 <|im_end|>（第 4 名，只差第一名 5%）。
+# 第一轮 DPO 就是栽在这：靶子瞄在一个吐不出来的 token 上，白训一轮。
+case("DPO：chosen 显式以 <|im_end|> 收尾（不能靠 eos_token_id）",
+     all(p["chosen"].endswith("<|im_end|>") for p in _pairs), True)
+case("DPO：rejected 不能也带上那个停止符（否则这一对没有对比）",
+     any(p["rejected"].endswith("<|im_end|>") for p in _pairs), False)
 case("DPO：chosen_from 必须是 sft（否则 train_dpo 报误导性警告）",
      sorted({p["chosen_from"] for p in _pairs}), ["sft"])
 case("DPO：chosen 与 rejected 不能相同（相同则梯度为 0）",
      all(p["chosen"] != p["rejected"] for p in _pairs), True)
-# 禁用列表里不能混进空白 token —— 它会被拿去 --ban-token-ids 把空格禁掉，答案当场变形
+# 统计里不能混进空白 token（剪的时候顺手带走的），否则「缺陷有几种形态」会失真
 case("DPO：乱码 id 统计不含空白 token", dict(_junk), {2: 2, 4: 1})
 
 

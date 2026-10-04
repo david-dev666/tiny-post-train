@@ -196,7 +196,6 @@ def build_engine(
     name: str, model_ref: str, adapter: Path | None, max_seq_len: int,
     load_in_4bit: bool = False, gpu_util: float = 0.85,
     enforce_eager: bool = True, enable_prefix_caching: bool = False,
-    ban_token_ids: tuple[int, ...] = (),
     template_mode: str = "auto", has_adapter: bool = False, model_hint: str = "",
 ):
     """按 `--engine` 造生成后端，并把对话模板钉到 tokenizer 上。
@@ -205,8 +204,6 @@ def build_engine(
     换引擎和换卷面两个变量一起动，分数差异归因不了（详见 engines.py 的说明）。
     """
     if name == "hf":
-        if ban_token_ids:
-            sys.exit("!! --ban-token-ids 只支持 vLLM 引擎（HF 那边要自己改 logits 处理器）")
         engine = make_engine("hf", model_ref, max_seq_len=max_seq_len, load_in_4bit=load_in_4bit)
     else:
         engine = make_engine(
@@ -214,7 +211,6 @@ def build_engine(
             adapter=str(adapter) if adapter else None,
             gpu_util=gpu_util, enforce_eager=enforce_eager,
             enable_prefix_caching=enable_prefix_caching,
-            ban_token_ids=ban_token_ids,
         )
     tokenizer = engine.tokenizer
     template, why = pick_chat_template(tokenizer, template_mode, has_adapter, model_hint)
@@ -265,19 +261,6 @@ def _junk_info(tokenizer, ids: list[int], text: str) -> tuple[bool, str, int]:
             return True, tokenizer.decode(ids[:-cut], skip_special_tokens=True).strip(), cut
         return False, text, 0
     return has_junk_tail(text), trim_junk_tail(text), 0
-
-
-def _parse_token_ids(spec: str) -> tuple[int, ...]:
-    """把 `--ban-token-ids` 的 `"139941,139942"` 解析成 id 元组。空串 = 不禁。"""
-    out = []
-    for piece in (spec or "").replace(";", ",").split(","):
-        piece = piece.strip()
-        if not piece:
-            continue
-        if not piece.isdigit():
-            sys.exit(f"!! --ban-token-ids 里 {piece!r} 不是整数 id")
-        out.append(int(piece))
-    return tuple(out)
 
 
 # ------------------------------------------------------------------ 三套评测
@@ -762,7 +745,12 @@ def parse_args():
                         help="HumanEval 每道题执行模型代码的超时秒数")
     parser.add_argument("--limit", type=int, default=0,
                         help="每套只跑前 N 条，冒烟测试用。结果不完整，别写进 README")
-    parser.add_argument("--output-dir", default="evals/results")
+    parser.add_argument("--output-dir", default=None,
+                        help="结果写到哪。默认 evals/results（--probe 时是 evals/probes）")
+    parser.add_argument("--probe", action="store_true",
+                        help="这是**探针**（对照组 / 中间实验），不是评测结果。"
+                             "会写进 evals/probes/ 并标上 kind=probe，"
+                             "**不进报告的主表** —— 只有真模型的成绩才该并排比较")
     parser.add_argument("--max-seq-len", type=int, default=2048)
     parser.add_argument("--max-new-tokens", type=int, default=256,
                         help="指令遵循题目的生成长度上限")
@@ -795,17 +783,16 @@ def parse_args():
     parser.add_argument("--vllm-prefix-caching", action="store_true",
                         help="vLLM：默认关闭。prefix caching 会让 KV 块布局随调度变化，"
                              "换个 attention 路径，对可复现性没好处")
-    parser.add_argument("--ban-token-ids", default="",
-                        help="**上界探针**：禁掉这些 token（逗号分隔的 id），量一量"
-                             "「只修乱码尾」到底值多少分。id 列表来自 "
-                             "make_dpo_data.py --mode stop-token 顺手落的 .junkids.json。"
-                             "注意这不是修复方案 —— 只能挡住已经见过的 id")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     global LIMIT
+    # 探针的结果**不进评测结果目录**：它换的是解码参数、不是模型，
+    # 混进报告主表会被读成「模型之间的差异」。显式给了 --output-dir 才听他的。
+    if args.output_dir is None:
+        args.output_dir = "evals/probes" if args.probe else "evals/results"
     LIMIT = max(0, args.limit)
     if LIMIT:
         print(f"!! --limit {LIMIT}：冒烟模式，结果不完整，不要写进 README")
@@ -841,7 +828,6 @@ def main():
         gpu_util=args.vllm_gpu_util,
         enforce_eager=not args.vllm_no_eager,
         enable_prefix_caching=args.vllm_prefix_caching,
-        ban_token_ids=_parse_token_ids(args.ban_token_ids),
         template_mode=args.chat_template,
         has_adapter=bool(args.adapter),
         model_hint=args.model,
@@ -917,6 +903,9 @@ def main():
     # 判分之外的异常：分数对不对是其次，「这个分数该不该信」才是第一位的。
     # 计数由引擎自己维护 —— vLLM 在引擎内部处理停止符，观测不到这个量，恒为 0。
     result["diagnostics"] = dict(engine.stats)
+    # 「评测结果」还是「探针」。报告只读前者 —— 探针换的是解码参数不是模型，
+    # 摆进同一张表会被读成模型之间的差异（这个坑在 2026-10-03 踩过一次）。
+    result["kind"] = "probe" if args.probe else "eval"
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

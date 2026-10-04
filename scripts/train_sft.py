@@ -2,6 +2,20 @@
 
 用法见 docs/00-getting-started.md。
 数据默认按 alpaca 字段 instruction / input / output 处理。
+
+⚠️ 本文件里有三个**已证否**的实验开关（默认全关，不要基于它们调参）：
+
+| 开关 | 想干什么 | 为什么不行 |
+| --- | --- | --- |
+| `--anchor-eos` / `--anchor-tail` | 砍掉前面的 loss，只训末尾几个 token | 目标欠约束：`tail=1` 推不动（loss 卡在 7.75 不动），`tail=32` 把内容带成复读 |
+| `--im-end-weight` | 全序列 loss，只把 `<|im_end|>` 位置加权 | 曲线很健康（rewards/acc 好看），但靶心基本没动，乱码尾仍在 |
+| `--align-eos` | 把 eos 指到 `<|im_end|>`，让训练/推理的停止符对齐 | v3 / v3b / v3c 三版**都停不下来**（评测里指令遵循 200/200 用满 token 上限），综合不如 v2 |
+
+三条路的共同结论：**「在 SFT 里硬修收尾」走不通** —— 收尾那个位置的梯度，
+要么推不动、要么一推就把内容带坏。**主模型仍是 v2**（`outputs/sft-4b-v2`，
+乱码尾 151/200 是它的已知缺陷，留给后面对齐阶段处理）。
+
+代码保留只为留档；逐轮细节见 `notes/workflow.md` 的失败记录。
 """
 
 import os
@@ -27,6 +41,9 @@ from unsloth import FastLanguageModel  # noqa: E402
 
 # 退化指标（复读率/多样性）的唯一实现在纯模块里，离线评测也要用同一份
 from metrics import repetition_metrics  # noqa: E402
+
+# 乱码尾的唯一判据（纯模块，评测/造数据用的也是它）
+from answer_extract import trailing_junk_len  # noqa: E402
 
 # 固定使用的干净模板。**不要改回 tokenizer 自带的那个。**
 #
@@ -183,9 +200,15 @@ class ProbeCallback(TrainerCallback):
                         pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
                         eos_token_id=stop_token_ids(tokenizer),
                     )
-                answer = tokenizer.decode(
-                    output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-                )
+                gen_ids = output[0][inputs["input_ids"].shape[1]:]
+                answer = tokenizer.decode(gen_ids, skip_special_tokens=True)
+                # 乱码尾诊断：**只在「模型自己决定收尾」时统计** ——
+                # 末 token 是停止符才算自然收尾；被 max_new_tokens 截断的样本
+                # 压根没走到收尾决策，算进去会把乱码率稀释掉（评测里也是这么分的）。
+                stops = set(stop_token_ids(tokenizer))
+                # 注意 gen_ids 是 tensor：`bool(tensor)` 会报
+                # "Boolean value of Tensor with more than one value is ambiguous"
+                finished = len(gen_ids) > 0 and int(gen_ids[-1]) in stops
                 records.append(
                     {
                         "step": step,
@@ -193,7 +216,11 @@ class ProbeCallback(TrainerCallback):
                         "prompt": prompt,
                         "output": answer.strip(),
                         "sec": round(time.time() - started, 2),
-                        **self.score(output[0][inputs["input_ids"].shape[1]:]),
+                        "finished": finished,
+                        "junk_tail": (
+                            trailing_junk_len(tokenizer, gen_ids) if finished else 0
+                        ),
+                        **self.score(gen_ids),
                     }
                 )
         finally:
@@ -394,6 +421,8 @@ def parse_args():
                    help="从训练集切多少当验证集，0 表示不切")
     p.add_argument("--eval-steps", type=int, default=50,
                    help="每多少步在验证集上评一次（需要 --eval-ratio > 0）")
+    p.add_argument("--logging-steps", type=int, default=10,
+                   help="每多少步打一次训练日志（调大可以减少输出刷屏）")
     p.add_argument("--bench-every", type=int, default=0,
                    help="每 N 步跑一次 MMLU 子集评测，0 表示关闭")
     p.add_argument("--bench-subset", default="evals/mmlu-subset.jsonl",
@@ -403,6 +432,22 @@ def parse_args():
     p.add_argument("--bench-batch-size", type=int, default=16)
     p.add_argument("--tokenizer-chat-template", action="store_true",
                    help="退回 tokenizer 自带模板（默认用项目内置的干净模板，见 CLEAN_CHAT_TEMPLATE 注释）")
+    p.add_argument("--anchor-eos", action="store_true",
+                   help="⚠️ **已证否，留档用**：末位 loss 续训（想修「收尾前吐乱码」），"
+                        "只保留末尾一段 token 的 loss。实测目标欠约束、推不动或学成复读 "
+                        "—— 见文件顶部总览与 notes/workflow.md 失败记录")
+    p.add_argument("--anchor-tail", type=int, default=ANCHOR_TAIL_TOKENS,
+                   help=f"末位 loss 保留末尾几个 token 的 labels（默认 {ANCHOR_TAIL_TOKENS}）。"
+                        "越小越聚焦收尾、但梯度信号越弱：32 会把内容套话一起强化（学成复读），"
+                        "1 最干净但信号弱到推不动 —— **整条路线已证否**，见文件顶部总览")
+    p.add_argument("--im-end-weight", type=float, default=0.0,
+                   help="⚠️ **已证否，留档用**：把 <|im_end|> 位置的 loss 权重放大 N 倍（0=关）。"
+                        "曲线健康但靶心没动、乱码尾仍在 —— 见文件顶部总览与失败记录")
+    p.add_argument("--align-eos", action="store_true",
+                   help="把 eos 指到 <|im_end|>、让训练文本末尾停在 <|im_end|>，"
+                        "避免 TRL 给每条样本末尾追加 <|endoftext|>（训练/推理的停止符对齐）。"
+                        "⚠️ **已证否**：v3/v3b/v3c 三版都「停不下来」，综合不如 v2 —— "
+                        "只留档，别基于它调参（见 notes/workflow.md 失败记录）")
     return p.parse_args()
 
 
@@ -468,14 +513,28 @@ def load_raw(data_path):
             if not files:
                 continue
             print(f"  读到 {ext}: {[os.path.basename(p) for p in files]}")
-            parts.append(load_dataset(ext, data_files=files, split="train"))
+            # HF load_dataset 的格式名里**没有 "jsonl"**，jsonl 要用 "json"。
+            # 直接传 "jsonl" 会去 Hub 找一个叫 jsonl 的数据集，离线直接报
+            # `Couldn't reach 'jsonl' on the Hub`。v3 用自生成 jsonl 时才踩到。
+            fmt = "json" if ext in ("json", "jsonl") else ext
+            parts.append(load_dataset(fmt, data_files=files, split="train"))
         if not parts:
             raise FileNotFoundError(
                 f"{data_path} 里没找到可用的数据文件"
                 "（支持 csv / jsonl / json / parquet），或者文件全是元信息"
             )
         return parts[0] if len(parts) == 1 else concatenate_datasets(parts)
-    return load_dataset(data_path, split="train")
+
+    # 单个文件：按后缀选格式。**不能直接 `load_dataset(路径)`** ——
+    # 那样会被当成 Hub 上的数据集名，报 `Couldn't find any data file`。
+    suffix = Path(data_path).suffix.lower().lstrip(".")
+    if suffix not in ("csv", "jsonl", "json", "parquet"):
+        raise FileNotFoundError(
+            f"{data_path} 的后缀 .{suffix} 不支持（支持 csv / jsonl / json / parquet）"
+        )
+    fmt = "json" if suffix in ("json", "jsonl") else suffix
+    print(f"  读到 {suffix}: {[os.path.basename(data_path)]}")
+    return load_dataset(fmt, data_files=[data_path], split="train")
 
 
 def build_user_text(example):
@@ -486,16 +545,134 @@ def build_user_text(example):
     return user
 
 
-def to_text(example, tokenizer, chat_template):
+def to_text(example, tokenizer, chat_template, drop_final_newline: bool = False):
     messages = [
         {"role": "user", "content": build_user_text(example)},
         {"role": "assistant", "content": _clean(example.get("output"))},
     ]
-    return {
-        "text": tokenizer.apply_chat_template(
-            messages, tokenize=False, chat_template=chat_template
-        )
-    }
+    text = tokenizer.apply_chat_template(
+        messages, tokenize=False, chat_template=chat_template
+    )
+    # 末尾停在 `<|im_end|>`（去掉模板那个换行）：配合 eos→`<|im_end|>`，
+    # TRL 的 `add_eos` 才会认为「已经以 eos 结尾」、**不再追加 `<|endoftext|>`**
+    if drop_final_newline and text.endswith("\n"):
+        text = text[:-1]
+    return {"text": text}
+
+
+# 末位 loss 的锚点：模板里每个回合都以 `<|im_end|>\n` 结尾
+EOS_ANCHOR = "<|im_end|>\n"
+# completion 末尾那个「收尾决策」token
+STOP_TOKEN_TEXT = "<|im_end|>"
+# completion 覆盖的末尾 token 数。
+#
+# ⚠️ **不能只留 1 个**（v3 第二轮就栽在这）：整条序列的 loss 缩到 1 个 token 后，
+# 梯度信号 ≈ 全序列的 1/154，目标欠约束 —— 模型不会原地不动，而是往没被约束的
+# 位置漂移（实测退化成复读），而靶心几乎不动。lr 从 1e-4 加到 1e-3 也没用。
+# 取一个「足够聚焦末位、又喂得饱梯度」的折中值。
+ANCHOR_TAIL_TOKENS = 32
+
+
+def to_anchor(example, tokenizer, chat_template):
+    """把样本翻成**整条对话文本**，以 `<|im_end|>` 结尾（不带末尾换行）。
+
+    ⚠️ **已证否**（v3 / v3b / v3c 三版都停不下来）—— 留档用，见文件顶部总览。
+
+    「只训末位」的 mask 交给 `build_anchor_collator` 在 token 层做，
+    **不在文本层切 prompt/completion**。原因：文本层切开后，tokenizer 对 `prompt`
+    与 `prompt+completion` 的切法会不一致（BPE 边界），TRL 直接报
+    `Mismatch between tokenized prompt and the start of tokenized prompt+completion`，
+    `completion_mask` 于是落在错的位置 —— 又在错的地方算 loss。
+    整条文本只 tokenize 一次，就没有这个问题。
+    """
+    messages = [
+        {"role": "user", "content": build_user_text(example)},
+        {"role": "assistant", "content": _clean(example.get("output"))},
+    ]
+    full = tokenizer.apply_chat_template(
+        messages, tokenize=False, chat_template=chat_template
+    )
+    if not full.endswith(EOS_ANCHOR):
+        # 模板一变锚点就不对了，宁可炸掉也别静默把 loss 算到错的位置
+        raise ValueError(f"模板不再以 {EOS_ANCHOR!r} 结尾，锚点要重定：{full[-40:]!r}")
+    # 去掉末尾那个模板换行：让整条文本以 <|im_end|> 收尾
+    # （既对上「收尾决策」，也让 add_eos 的 .endswith(eos) 成立、不再追加 token）
+    return {"text": full[: -len("\n")]}
+
+
+def build_anchor_collator(tokenizer, max_length: int, tail: int = ANCHOR_TAIL_TOKENS):
+    """只保留每条样本**末尾 tail 个 token** 的 labels，其余置 -100。
+
+    ⚠️ **已证否**（`tail=1` 推不动、`tail=32` 学成复读）—— 留档用，见文件顶部总览。
+
+    这是「末位 loss」的真正落点：不依赖 TRL 的 `completion_only_loss`（那要靠文本
+    切分，切在内容中间必然边界错位），而是直接对 token 序列做掩码。
+
+    ⚠️ **collator 拿到的是 token，不是文本**：TRL 的 `SFTTrainer` 会先在自己的预处理
+    (`sft_trainer.tokenize_fn`) 里把 `text` tokenize 成 `input_ids`，`text` 字段会被丢掉。
+    所以这里从 `input_ids` 出发、自己做 padding —— 不能再按 `text` 取字段
+    （v3 第三次启动就是栽在这个 `KeyError: 'text'` 上）。padding 也用 Qwen3 的
+    `<|vision_pad|>`，和 TRL 默认一致。
+    """
+    pad_id = tokenizer.pad_token_id
+
+    def collate(features):
+        rows = [list(feature["input_ids"])[:max_length] for feature in features]
+        width = max(len(ids) for ids in rows)
+
+        input_ids, attention, labels = [], [], []
+        for ids in rows:
+            pad = width - len(ids)
+            input_ids.append(ids + [pad_id] * pad)
+            attention.append([1] * len(ids) + [0] * pad)
+            # 末尾 tail 个 token 参与 loss，前面一律 -100（causal shift 后
+            # 正好对应「预测末尾 tail 个 token，含最后那个 <|im_end|>」）
+            lab = [-100] * len(ids)
+            cut = max(0, len(ids) - tail)
+            lab[cut:] = ids[cut:]
+            labels.append(lab + [-100] * pad)
+
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(attention, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+        }
+
+    return collate
+
+
+def build_im_end_loss(tokenizer, weight: float):
+    """全序列 loss，但把 `<|im_end|>` 位置的权重放大 `weight` 倍。
+
+    ⚠️ **已证否**（曲线健康但靶心没动，乱码尾仍在）—— 留档用，见文件顶部总览。
+
+    为什么不用「末位 loss」(`--anchor-eos`)：那会把内容一起扰动 —— 实测 tail=32/8
+    都学成了复读（见失败记录）。加权是折中：**内容照常训练，收尾那一个 token 被单独强调**，
+    于是「梯度打在哪」和「内容不受扰」两件事同时成立。
+
+    代价：绕过 unsloth 的 fused loss，走普通交叉熵（稍慢一点，可接受）。
+    """
+    import torch.nn.functional as F
+
+    im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+
+    def compute_loss(outputs, labels, num_items_in_batch=None):
+        logits = outputs.logits
+        # 因果 shift：用位置 i 的 logits 预测位置 i+1
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        per_token = F.cross_entropy(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1).clamp(min=0),   # -100 先置 0，下面用 valid 掩掉
+            reduction="none",
+        ).view_as(shift_labels)
+        valid = (shift_labels != -100).to(per_token.dtype)
+        w = torch.where(shift_labels == im_end_id,
+                        torch.full_like(valid, float(weight)), valid)
+        denom = (valid * w).sum().clamp(min=1.0)
+        return (per_token * valid * w).sum() / denom
+
+    return compute_loss
 
 
 def _config_fields() -> set:
@@ -521,13 +698,18 @@ def build_config(args, common):
         return SFTConfig(max_length=args.max_seq_len, **common)
 
 
-def build_trainer(model, tokenizer, train_dataset, config, callbacks=None, eval_dataset=None):
+def build_trainer(model, tokenizer, train_dataset, config, callbacks=None,
+                  eval_dataset=None, data_collator=None, compute_loss_func=None):
     kwargs = dict(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         args=config,
         callbacks=callbacks,
     )
+    if data_collator is not None:
+        kwargs["data_collator"] = data_collator
+    if compute_loss_func is not None:
+        kwargs["compute_loss_func"] = compute_loss_func
     try:
         return SFTTrainer(model=model, processing_class=tokenizer, **kwargs)
     except TypeError:
@@ -556,9 +738,23 @@ def main():
         print("模板：使用项目内置的干净模板（不含 <think> 空块）")
     tokenizer.chat_template = chat_template
 
+    if args.align_eos:
+        # 把 eos 指到 <|im_end|>。Qwen3 的 `tokenizer.eos_token` 是 `<|endoftext|>`，
+        # 而对话模板的停止符是 `<|im_end|>` —— 这两个不是同一个 token。
+        # 不指过去的话，TRL 的 `add_eos` 会给每条样本末尾**追加一个 `<|endoftext|>`**，
+        # 训练目标变成「…<|im_end|>\n<|endoftext|>」，而推理时在 `<|im_end|>` 就停 ——
+        # 训练/推理的停止符对不上（见 notes/workflow.md）。
+        im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if tokenizer.eos_token_id != im_end_id:
+            print(f"停止符对齐：eos_token {tokenizer.eos_token_id} → {im_end_id}（<|im_end|>）")
+            tokenizer.eos_token_id = im_end_id
+
     model = FastLanguageModel.get_peft_model(
         model,
         r=args.lora_r,
+        # 回到 1×r（和 v2 一致）。v3 那版用了 2×r，但它和「去掉末尾换行」一起改，
+        # 事后没法归因到底是哪一处把能力带低了（见 notes/workflow.md）。
+        # 这一版**只动 eos 对齐一处**，所以 alpha 保持不动。
         lora_alpha=args.lora_r,
         lora_dropout=0.0,
         bias="none",
@@ -571,11 +767,54 @@ def main():
     )
 
     dataset = load_raw(args.data)
-    dataset = dataset.map(
-        lambda ex: to_text(ex, tokenizer, chat_template),
-        remove_columns=dataset.column_names,
-        desc="格式化数据",
-    )
+    if args.anchor_eos:
+        # 🔴 eos 必须指到 <|im_end|>。否则 TRL 的 add_eos 会给 completion 追加
+        # <|endoftext|>，训练目标变成「内容 → <|im_end|> → \n → <|endoftext|>」，
+        # 梯度被那个排 8958 名的 token 稀释 —— 和 DPO 三轮白训是同一个坑。
+        # pad_token 是独立的 <|vision_pad|>，改这里不影响 padding。
+        im_end_id = tokenizer.convert_tokens_to_ids(STOP_TOKEN_TEXT)
+        if tokenizer.eos_token_id != im_end_id:
+            print(f"末位 loss：eos_token {tokenizer.eos_token_id} → {im_end_id}"
+                  f"（{STOP_TOKEN_TEXT}）；否则 completion 会被追加 <|endoftext|>")
+            tokenizer.eos_token_id = im_end_id
+        print("末位 loss 模式：只在回复末尾 <|im_end|> 上算 loss"
+              "（--model 必须指向已合并的 SFT 模型，否则学不到内容）")
+        dataset = dataset.map(
+            lambda ex: to_anchor(ex, tokenizer, chat_template),
+            remove_columns=dataset.column_names,
+            desc="构造末位样本",
+        )
+    else:
+        # 末尾**去掉**模板那个换行，让整条文本停在 `<|im_end|>`。
+        #
+        # ⚠️ 「eos 对齐」这条路**整体没走通，别再基于它调参**（三版实测）：
+        #
+        #   | 版本 | alpha | 末尾 | 结果 |
+        #   | v3  | 2×r | 去 \n | 乱码尾 151→23/200，**但停不下来** |
+        #   | v3b | 1×r | 保留 \n | 同进度收尾学不会（复读 0.48/0.52） |
+        #   | v3c | 1×r | 去 \n | 更差（复读 0.58/0.84） |
+        #
+        # 三版**都停不下来**：v3 的评测里指令遵循 200/200、GSM8K 1318/1319 全部用满
+        # token 上限（`…是北京，一个值得珍惜的城市。是北京…` 一路复读），
+        # 内容约束 25/25、代码约束 25/25 满分，崩掉的全是形式类约束 ——
+        # 即「乱码尾从 151/200 降到 23/200」是用**更致命的「不会收尾」**换来的，
+        # v3 综合不如 v2（指令遵循 61.5%→45.0%，GSM8K 83.2%→72.8%）。
+        #
+        # 保留 \n 的 v3b 也不行：eos 已指向 `<|im_end|>`，TRL 的 add_eos 会给末尾
+        # **追加一个 `<|im_end|>`**，训练文本结尾成了 `…回答<|im_end|>\n<|im_end|>`，
+        # 模型最后要学的那个 token 是「`\n` → `<|im_end|>`」—— 与推理时的上下文
+        # （回答末字 → `<|im_end|>`）不符。**这条路两头都不通。**
+        #
+        # 结论：主模型仍是 v2（`outputs/sft-4b-v2`）；本开关保留仅为留档。
+        # 详见 notes/workflow.md 的失败记录。
+        dataset = dataset.map(
+            lambda ex: to_text(
+                ex, tokenizer, chat_template,
+                drop_final_newline=args.align_eos,
+            ),
+            remove_columns=dataset.column_names,
+            desc="格式化数据",
+        )
     eval_dataset = None
     if args.eval_ratio > 0:
         split = dataset.train_test_split(test_size=args.eval_ratio, seed=args.seed)
@@ -586,7 +825,15 @@ def main():
         )
     else:
         print(f"训练样本: {len(dataset)} | 无验证集（--eval-ratio 0）")
-    print("抽查一条:\n" + dataset[0]["text"][:600])
+    sample = dataset[0]
+    if "text" in sample:
+        print("抽查一条:\n" + sample["text"][:600])
+    else:
+        # 末位样本只有 prompt/completion 两列，没有 text —— 打印时按列自适应，
+        # 别再硬编码 ["text"]（v3 第一次启动就是栽在这行上，见失败记录）
+        print("抽查一条（末位样本）:")
+        print("  prompt 尾部: " + repr(sample["prompt"][-400:]))
+        print("  completion : " + repr(sample["completion"]))
 
     bf16_ok = torch.cuda.is_bf16_supported()
     common = dict(
@@ -598,7 +845,7 @@ def main():
         max_steps=args.max_steps,
         warmup_ratio=0.03,
         lr_scheduler_type="cosine",
-        logging_steps=10,
+        logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         save_total_limit=3,
         bf16=bf16_ok,
@@ -607,8 +854,18 @@ def main():
         seed=args.seed,
         report_to=args.report_to,
         logging_dir=str(Path(args.output) / "tb"),
-        dataset_text_field="text",
     )
+    # 两种模式都是语言建模格式（整条 text）。差别只在 collator ——
+    # anchor 模式下 mask 掉前面、只留末尾 ANCHOR_TAIL_TOKENS 个 token 的 loss
+    common["dataset_text_field"] = "text"
+
+    compute_loss_func = None
+    if args.im_end_weight > 0:
+        # 全序列 loss + 收尾加权：内容不动，只把 <|im_end|> 的权重抬上去。
+        # ⚠️ compute_loss_func 是 **Trainer 的构造参数**，不是 SFTConfig 的字段 ——
+        # 塞进 SFTConfig 会直接 TypeError（SFTConfig 里没有它，v3 试过一次）
+        compute_loss_func = build_im_end_loss(tokenizer, args.im_end_weight)
+        print(f"收尾加权：<|im_end|> 位置的 loss ×{args.im_end_weight}（内容照常训）")
 
     if eval_dataset is not None:
         fields = _config_fields()
@@ -684,6 +941,11 @@ def main():
                 f"{len(callbacks[-1].questions)} 题 → {bench_path}"
             )
 
+    anchor_collator = None
+    if args.anchor_eos:
+        # 末位 loss 的真正实现：token 层 mask（见 build_anchor_collator）
+        anchor_collator = build_anchor_collator(tokenizer, args.max_seq_len, tail=args.anchor_tail)
+        print(f"末位 loss：只保留每条样本末尾 {args.anchor_tail} 个 token 的 loss")
     trainer = build_trainer(
         model,
         tokenizer,
@@ -691,6 +953,8 @@ def main():
         build_config(args, common),
         callbacks=callbacks,
         eval_dataset=eval_dataset,
+        data_collator=anchor_collator,
+        compute_loss_func=compute_loss_func,
     )
     stats = trainer.train()
     print(f"训练完成: {stats.metrics}")

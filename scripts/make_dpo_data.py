@@ -77,9 +77,10 @@ instruct 更好就它是 chosen，我们自己的 SFT 更好就反过来。
 
 **必须在 vllm 环境里跑**（要 /root/autodl-tmp/envs/vllm/bin/python）。
 
-`stop-token` 模式还会顺手落一份 `<out>.junkids.json`（末尾乱码 token 的 id 与
-出现次数），给 `eval.py --ban-token-ids` 做「上界探针」：先不训练，直接禁掉这些
-token 跑一遍评测，就知道「只修这一个毛病」能值多少分。
+`stop-token` 模式还会顺手落两份：
+- `<out>.raw.jsonl` —— 原始生成记录（含 token id），改构造规则时可离线重造
+- `<out>.junkids.json` —— 末尾乱码 token 的 id、出现次数与单 token 解码样例，
+  用来核对这个缺陷的具体形态（实测只有 6 种，主力是希伯来语词 `לחלוט`）
 """
 
 from __future__ import annotations
@@ -102,6 +103,11 @@ import prompts as P  # noqa: E402  纯文本模块，两个环境都能用
 
 # 乱码尾的唯一判据（纯文本模块，不需要 torch）
 from answer_extract import is_junk_piece, trailing_junk_len  # noqa: E402
+
+# 停止符裁剪的唯一实现。**不能省** —— vLLM 的 token_ids 带着停止符，
+# 留着它 trailing_junk_len 会把停止符当成「最后那个 token」，
+# 于是永远判不出末尾的乱码，偏好对一条也造不出来（而且不报错）。
+from engines import strip_stop_tokens  # noqa: E402
 
 
 def prepare_env() -> None:
@@ -191,8 +197,13 @@ class Engine:
                 completion = one.outputs[0]
                 records.append({
                     "text": completion.text.strip(),
-                    "ids": [int(t) for t in completion.token_ids],
-                    # vLLM 的 token_ids 不含停止符，所以「用满预算」= finish_reason 是 length
+                    # vLLM 的 token_ids **含**停止符，必须去掉（和 HF 引擎同口径）——
+                    # 见 engines.strip_stop_tokens 的说明：差这一个 token，
+                    # 乱码尾判定会静默归零，而且看不出来
+                    "ids": strip_stop_tokens(
+                        [int(t) for t in completion.token_ids], stop_ids),
+                    # 「用满预算」直接看 finish_reason，别拿 len(ids) 反推 ——
+                    # 那要依赖 ids 里有没有停止符，正是上面刚踩过的坑
                     "truncated": completion.finish_reason == "length",
                 })
             if label:
@@ -281,6 +292,22 @@ def build_pairs(prompts, ours, theirs, judges, judge_tokenizer):
 
 # ------------------------------------------------------------------ 模式二：停止决策
 
+# chosen 末尾要**显式**写上的停止符。
+#
+# 🔴 必须显式写，绝不能指望 tokenizer 的 `eos_token_id` —— 那俩不是同一个 token：
+#
+#     tokenizer.eos_token_id = 151643 <|endoftext|>   收尾位置排第 **8958** 名（≈0）
+#     训练数据真正教的是     151645 <|im_end|>         排第 **4**，只比第一名低 5%
+#
+# 第一轮 DPO 就是栽在这里：数据里 chosen 是纯文本，追加 EOS 的活儿交给了 TRL，
+# 而它用的是 eos_token_id = 151643 —— 一个模型在那个位置根本吐不出来的 token。
+# 于是 `rewards/chosen` 死活拉不动（+0.05）、`rewards/rejected` 一崩到底（-4.45），
+# 训练曲线看着很健康，模型却毫无变化。
+#
+# 靶心对准之后的实测上界（把 <|im_end|> 的 logit 抬 +2.0）：
+#     指令遵循 123/200（61.5%）→ **162/200（81.0%）**
+STOP_TOKEN_TEXT = "<|im_end|>"
+
 
 def build_stop_pairs(prompts, records, tokenizer):
     """把「答完之后吐乱码」翻成偏好对。返回 (保留的对, 统计, 乱码 token 计数)。
@@ -317,26 +344,29 @@ def build_stop_pairs(prompts, records, tokenizer):
         if cut == 0:
             stats["干净收尾（丢弃）"] += 1
             continue
-        chosen = tokenizer.decode(record["ids"][:-cut], skip_special_tokens=True).strip()
-        if not chosen:
+        body = tokenizer.decode(record["ids"][:-cut], skip_special_tokens=True).strip()
+        if not body:
             # 整条输出都是乱码，剪完什么都不剩 —— 这种对教不了任何东西
             stats["剪完是空的（丢弃）"] += 1
             continue
+        # chosen 末尾**显式**补上 `<|im_end|>`。这一行就是整件事的靶心，
+        # 见 STOP_TOKEN_TEXT 上面那段说明 —— 不能指望 tokenizer 自己追加。
+        chosen = body + STOP_TOKEN_TEXT
         for token_id in record["ids"][-cut:]:
             # **只统计真正的乱码 token**：`cut` 里还含尾随的空白（剪的时候
-            # 顺手带走），空白一旦混进 .junkids.json，那份列表就会被拿去
-            # `--ban-token-ids` 把空格禁掉 —— 答案会当场变形。
+            # 顺手带走），空白混进去会让「这个缺陷有几种形态」这份统计失真。
             if is_junk_piece(tokenizer.decode([int(token_id)], skip_special_tokens=False)):
                 junk_ids[int(token_id)] += 1
         pairs.append({
             "prompt": prompt,
             "chosen": chosen,
+            # rejected 是模型原样输出（末尾那个乱码 token 还在）
             "rejected": record["text"],
             # chosen **确实来自 SFT**（只是把尾巴上的乱码剪了），不是模仿别人答的。
             # train_dpo.py 靠这个字段判断「这轮是不是在蒸馏」，别写成别的值 ——
             # 写成空/别的会让它报「chosen 全部来自 instruct」那条误导性警告。
             "chosen_from": "sft",
-            "source": "SFT 自采样 + 剪掉末尾乱码 token",
+            "source": "SFT 自采样 + 末尾乱码换成 <|im_end|>",
             # 一共剪了几个 token（**含**尾随空白，所以可能大于乱码本身的个数）
             "trimmed_tokens": cut,
         })
@@ -368,11 +398,19 @@ def run_stop_token(args) -> int:
         for record in pairs:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    # 乱码 token 的 id 落盘：`eval.py --ban-token-ids` 拿它做「上界探针」——
-    # 先不训练，直接禁掉这些 token 跑一遍，就知道「只修这一个毛病」值多少分。
+    # 原始记录（含 token id）也落盘 —— 它才是「造偏好对」的真正输入。
+    # 改了 build_stop_pairs 的规则之后，可以直接拿它离线重造，不必再跑 6 分钟生成。
+    raw_path = out_path.with_suffix(".raw.jsonl")
+    with raw_path.open("w", encoding="utf-8") as handle:
+        for prompt, record in zip(prompts, records):
+            handle.write(json.dumps({"prompt": prompt, **record}, ensure_ascii=False) + "\n")
+
+    # 乱码 token 的 id 落盘：用来核对这个缺陷的**具体形态**。
+    # 实测只有 6 种，主力是第一行那个希伯来语词 —— 而词表里独立解码含 U+FFFD
+    # 的 token 有 1457 个，所以「禁掉它们」这条路走不通，必须训练侧修。
     ids_path = out_path.with_suffix(".junkids.json")
     ids_path.write_text(json.dumps({
-        "note": "末尾乱码 token 的 id 与出现次数。给 eval.py --ban-token-ids 做上界探针用",
+        "note": "末尾乱码 token 的 id、出现次数与单 token 解码样例（缺陷形态记录）",
         "tokenizer": args.model,
         "counts": dict(junk_ids.most_common()),
         "sample_decode": {str(i): tokenizer.decode([i], skip_special_tokens=False)

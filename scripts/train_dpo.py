@@ -125,6 +125,32 @@ def build_model(args):
     )
     tokenizer.chat_template = ts.CLEAN_CHAT_TEMPLATE   # 和 SFT 一致，别换
 
+    # ================================================================
+    # 🔴 别删这一段。它是两轮 DPO 白训之后换来的。
+    #
+    # TRL 的 DPOTrainer 会给 **chosen 和 rejected 都追加一个 EOS**
+    # （0.24 的 `tokenize_row` 文档原话：「the completion sequences will have
+    # an eos token appended」），追加的是 `tokenizer.eos_token_id` ——
+    # 而 Qwen3 的是 **151643 `<|endoftext|>`**，不是训练数据真正教的
+    # 151645 `<|im_end|>`。
+    #
+    # 后果：两份序列共用同一个 token，而它在这个位置排第 **8958** 名
+    # （logprob -18.5）—— 动态范围极大。DPO 立刻找到这条捷径：不去啃那个
+    # 平的乱码簇（`<|im_end|>` 只比它低 0.13 nats），而是拼命压低
+    # `<|endoftext|>`。实测它在那里花了 **5.16 nats**，而真正的靶心
+    # （`<|im_end|>` vs 乱码）只动了 **0.06 nats** —— 训练曲线一片健康
+    # （rewards/chosen +1.59、accuracies 0.99），模型却毫无变化。
+    #
+    # 把 eos 指到 `<|im_end|>`，共用后缀就变成一个**可达**的 token，
+    # 那条捷径就没了。不改这里，再训十轮也是同样的结果。
+    # ================================================================
+    im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+    if tokenizer.eos_token_id != im_end_id:
+        print(f"==> eos_token_id {tokenizer.eos_token_id} → {im_end_id}（<|im_end|>）")
+        print("    TRL 会给 chosen/rejected 各追加一个 EOS；用 <|endoftext|> 的话")
+        print("    两份序列共用一个「排 8958 名」的 token，梯度会被它吸干 —— 见注释")
+        tokenizer.eos_token_id = im_end_id
+
     # 1) 把 SFT adapter 合并进权重 —— 合并后它就是「DPO 的起点」
     from peft import PeftModel
 
