@@ -42,6 +42,34 @@ MAIN_SUITES = [
 # 每个模型固定一个颜色，方便跨图对照
 PALETTE = ["#4c8dff", "#3fb950", "#e3b341", "#db61a2", "#a371f7", "#39c5cf"]
 
+# 展示顺序 = **训练顺序**（base → SFT → DPO → …），官方 instruct 永远排最后当参考。
+#
+# 为什么用显式清单而不是字母序：字母序排出来是 base / instruct / sft-4b-v2 这种
+# 跟训练过程毫无关系的顺序，读者看不出「这一行是在上一行基础上加了什么」——
+# 而这张表的全部意义恰恰是看每一步的增量。
+LABEL_ORDER = ("base-4b", "sft-4b-v2", "dpo-4b-open")
+
+# 参考基线（官方对齐版）：排最后、单独隔一行、**不参与「领先」标记**。
+# 它是标尺不是选手 —— 让它抢走 ▲ 就看不出「我们自己训的哪个最好」了。
+REFERENCE_PREFIXES = ("instruct-",)
+
+
+def is_reference(label: str) -> bool:
+    return any(label.startswith(p) for p in REFERENCE_PREFIXES)
+
+
+def order_results(results: list[dict]) -> list[dict]:
+    def key(r: dict):
+        label = r["label"]
+        if is_reference(label):
+            return (3, 0, label)
+        if label in LABEL_ORDER:
+            return (1, LABEL_ORDER.index(label), "")
+        # 不在清单里的（新实验、截断跑）排在中间，按字母序保持确定性
+        return (2, 0, label)
+
+    return sorted(results, key=key)
+
 
 def load_results(directory: Path) -> list[dict]:
     """读结果目录。judge-*.json 是裁判结果，单独处理。
@@ -410,7 +438,8 @@ tr:last-child td { border-bottom:none; }
 td.num { font-variant-numeric:tabular-nums; }
 .ci { color:#8c959f; font-size:11px; margin-left:5px; }
 .frac { color:#8c959f; font-size:11px; }
-.lead { color:#1a7f37; font-size:11px; }
+.lead { background:#dafbe1; color:#116329; font-size:11px; font-weight:600;
+  border-radius:10px; padding:1px 6px; margin-left:4px; white-space:nowrap; }
 .muted { color:#b1b8c0; }
 .bar { display:block; }
 td .bar { margin-bottom:3px; }
@@ -420,19 +449,44 @@ pre { background:#0d1117; color:#c9d1d9; padding:16px; border-radius:8px; overfl
 .meta code { background:#eaeef2; padding:1px 5px; border-radius:4px; }
 .tag { display:inline-block; background:#eaeef2; color:#57606a; border-radius:20px; padding:1px 9px; font-size:11px; margin-left:6px; }
 .tag.warn { background:#fff1c1; color:#8a6100; }
+.tag.ref { background:#eef2ff; color:#3b4a9e; }
+
+/* 居中 + 限宽：宽屏上表格不被拉成一条，窄屏上也不会贴边 */
+.wrap { max-width:1240px; margin:0 auto; }
+
+/* 参考基线（官方 instruct）整行去饱和 —— 一眼分清「标尺」和「选手」 */
+tr.ref-row td { background:#fbfcfe; }
+tr.ref-row td:first-child { border-left:3px solid #c8d2f5; }
+tr.sep td { background:#f6f8fa; color:#57606a; font-size:12px;
+  border-top:2px solid #d8dee4; border-bottom:1px solid #eaeef2; padding:8px 14px; }
+
+/* 表变宽（手机上）以后全靠这两条才读得下去：悬浮高亮 + 首列吸附 */
+tbody tr:hover td { background:#f3f7ff; }
+tbody tr.ref-row:hover td { background:#f4f7fd; }
+th:first-child, td:first-child { position:sticky; left:0; background:#fff; z-index:1; }
+th:first-child { background:#f6f8fa; z-index:2; }
+tr.sep td:first-child { background:#f6f8fa; }
+tr.ref-row td:first-child { background:#fbfcfe; }
+
+/* 小屏收紧内边距，别让两列就撑满屏幕 */
+@media (max-width:720px) {
+  body { padding:20px 12px 60px; }
+  th, td { padding:8px 10px; font-size:12px; }
+}
 """
 
 
 def render(results: list[dict], judges: list[dict]) -> str:
     # 截断跑（--limit）也进主表：三个模型截的是同一批题，是有效可比数据，
     # 排掉就等于把结论藏起来了。截断这件事改用标注提示。
-    active = sorted(results, key=lambda r: (r.get("adapter") is None, r["label"]))
+    active = order_results(results)
     colors = {data["label"]: PALETTE[i % len(PALETTE)] for i, data in enumerate(active)}
 
     parts = [
         "<!doctype html>", '<html lang="zh-CN"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
         "<title>tiny-post-train · 模型评测报告</title>",
-        f"<style>{CSS}</style></head><body>",
+        f'<style>{CSS}</style></head><body><div class="wrap">',
         "<h1>模型评测报告</h1>",
         f'<div class="sub">生成于 {time.strftime("%Y-%m-%d %H:%M:%S")}　·　'
         f"{len(active)} 个模型　·　数据来自 <code>evals/results/</code></div>",
@@ -443,29 +497,46 @@ def render(results: list[dict], judges: list[dict]) -> str:
     if not active:
         parts.append('<div class="alert">没有找到完整结果。先跑：'
                      "<code>python scripts/eval_pipeline.py --run ...</code></div>")
-        return "\n".join(parts) + "</body></html>"
+        return "\n".join(parts) + "</div></body></html>"
 
     # ---- 主对照表
     suites = [(k, name, note) for k, name, _lower, note in MAIN_SUITES if any(k in r for r in active)]
     if suites:
         parts.append("<h2>主指标对照</h2>")
+        parts.append(
+            '<div class="sub">按 <b>训练顺序</b>排列（base → SFT → DPO），'
+            "一眼能看出每一步的增量；最后一行是官方 <code>instruct-2507</code>，"
+            "<b>作为上限参照，不参与「▲ 领先」标记</b>。</div>"
+        )
         parts.append('<div class="card"><table><thead><tr><th>模型</th>')
         for _key, name, note in suites:
             parts.append(f'<th>{html.escape(name)}<div class="frac">{html.escape(note)}</div></th>')
         parts.append("</tr></thead><tbody>")
-        for data in active:
-            parts.append(f'<tr><td><span class="dot" style="background:{colors[data["label"]]}"></span>'
-                         f'<b>{html.escape(data["label"])}</b>'
-                         + (f'<span class="tag warn">截断 {data["_partial"]} 条</span>'
-                            if data.get("_partial") else "")
-                         + f'<div class="frac">{html.escape(Path(str(data.get("base_model_used", data.get("model", "")))).name)}'
-                         + (f' + {html.escape(Path(str(data["adapter"])).name)}' if data.get("adapter") else "")
-                         + "</div></td>")
+        for idx, data in enumerate(active):
+            ref = is_reference(data["label"])
+            if ref and idx and not is_reference(active[idx - 1]["label"]):
+                # 参考基线单独隔一行：它是标尺，不是选手
+                parts.append(
+                    f'<tr class="sep"><td colspan="{len(suites) + 1}">'
+                    "以下为 <b>参考基线</b>（官方对齐版）—— 用来量差距，不参与「▲ 领先」标记</td></tr>"
+                )
+            parts.append(
+                f'<tr class="{"ref-row" if ref else ""}">'
+                f'<td><span class="dot" style="background:{colors[data["label"]]}"></span>'
+                f'<b>{html.escape(data["label"])}</b>'
+                + (f'<span class="tag warn">截断 {data["_partial"]} 条</span>'
+                   if data.get("_partial") else "")
+                + ('<span class="tag ref">参考</span>' if ref else "")
+                + f'<div class="frac">{html.escape(Path(str(data.get("base_model_used", data.get("model", "")))).name)}'
+                + (f' + {html.escape(Path(str(data["adapter"])).name)}' if data.get("adapter") else "")
+                + "</div></td>"
+            )
             for key, _name, _note in suites:
                 slot = data.get(key) or {}
+                # 「领先」只在**我们自己训的模型**之间比 —— 参考基线不参赛
                 values = [r.get(key, {}).get("accuracy", r.get(key, {}).get("rate"))
-                          for r in active if r.get(key)]
-                best = max([v for v in values if v is not None], default=None)
+                          for r in active if r.get(key) and not is_reference(r["label"])]
+                best = None if ref else max([v for v in values if v is not None], default=None)
                 value = slot.get("accuracy", slot.get("rate"))
                 parts.append(
                     '<td class="num">'
@@ -597,7 +668,7 @@ def render(results: list[dict], judges: list[dict]) -> str:
             f"出正式结论请去掉 <code>--limit</code> 跑全量。</div></div>"
         )
 
-    parts.append("</body></html>")
+    parts.append("</div></body></html>")
     return "\n".join(parts)
 
 
@@ -615,12 +686,23 @@ def main():
     judges = load_judges(directory)
     print(f"==> 读到 {len(results)} 份结果、{len(judges)} 份裁判结果")
 
+    page = render(results, judges)
     out_path = Path(args.out) if args.out else directory / "report.html"
-    out_path.write_text(render(results, judges), encoding="utf-8")
+    out_path.write_text(page, encoding="utf-8")
     print(f"==> 报告写入 {out_path}")
     print(f"    打开：open {out_path}")
 
-    markdown = markdown_table(results)
+    # GitHub Pages 用「main 分支 / docs」这个源时，**站点根目录就是 docs/**，
+    # 所以首页必须是 docs/index.html（放在 evals/ 里在站点上永远访问不到）。
+    # 报告本身是自包含 HTML（内联 CSS + 内联 SVG、零外部资源），可以直接发布；
+    # docs/.nojekyll 关掉 Jekyll 处理，免得页面里的花括号被当成模板语法吃掉。
+    # 两处都是同一个 render() 的产物 —— 不会出现「本地和线上不是同一份」。
+    pages_path = PROJECT_DIR / "docs" / "index.html"
+    pages_path.parent.mkdir(parents=True, exist_ok=True)
+    pages_path.write_text(page, encoding="utf-8")
+    print(f"==> GitHub Pages 首页写入 {pages_path}")
+
+    markdown = markdown_table(order_results(results))
     if markdown:
         print("\n---- 复制到 README ----")
         print(markdown)
