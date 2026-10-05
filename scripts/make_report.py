@@ -174,8 +174,8 @@ def engine_warning(results: list[dict]) -> str:
         "当成「模型的差异」</b>：两个引擎在 bf16 下逐题预测会有约 1/4 翻转"
         "（实测 50 题里 13 题，聚合分差 3 题）。</div>"
         f"<div>{detail}</div>"
-        "<div>换引擎必须<b>整批重跑</b>，不能只补一部分再拼。"
-        "重跑命令见 <code>notes/workflow.md</code> 的「评测」一节。</div></div>"
+        "<div>换引擎必须<b>整批重跑</b>，不能只补一部分再拼："
+        "<code>python scripts/eval_pipeline.py --engine vllm --force ...</code></div></div>"
     )
 
 
