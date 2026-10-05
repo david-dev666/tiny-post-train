@@ -167,13 +167,13 @@ def consistency_warning(results: list[dict]) -> str:
             detail = "；".join(
                 f"{count} 条（{', '.join(labels)}）" for (_digest, count), labels in shas.items()
             )
-            problems.append(f"{suite} 的题目不一致：{detail}")
+            problems.append(f"{suite} 评测集不一致：{detail}")
     if not problems:
         return ""
     items = "".join(f"<li>{html.escape(p)}</li>" for p in problems)
     return (
-        '<div class="alert"><b>⚠ 可比性告警</b>'
-        "<div>下面这些结果的评测集不是同一份，并排比较没有意义：</div>"
+        '<div class="alert"><b>可比性告警</b>'
+        "<div>下列结果的评测集不是同一份，并排比较不成立：</div>"
         f"<ul>{items}</ul></div>"
     )
 
@@ -197,12 +197,11 @@ def engine_warning(results: list[dict]) -> str:
         for name, labels in sorted(engines.items())
     )
     return (
-        '<div class="alert"><b>⚠ 混了推理引擎</b>'
-        "<div>这批结果的生成后端不是同一个，<b>并排比较会把「换尺子的差异」"
-        "当成「模型的差异」</b>：两个引擎在 bf16 下逐题预测会有约 1/4 翻转"
-        "（实测 50 题里 13 题，聚合分差 3 题）。</div>"
+        '<div class="alert"><b>推理引擎不一致</b>'
+        "<div>本批结果的生成后端不统一。不同后端在 bf16 下逐题预测存在翻转"
+        "（实测 50 题中 13 题，聚合分差 3 题），<b>并排比较会把后端差异计入模型差异</b>。</div>"
         f"<div>{detail}</div>"
-        "<div>换引擎必须<b>整批重跑</b>，不能只补一部分再拼："
+        "<div>变更引擎须<b>整批重跑</b>，不支持部分补跑后拼接："
         "<code>python scripts/eval_pipeline.py --engine vllm --force ...</code></div></div>"
     )
 
@@ -250,12 +249,12 @@ def style_footnote(results: list[dict]) -> str:
     counts = "；".join(f"{unparsed}/{total}" for _l, _n, unparsed, total in hits)
     return (
         '<div class="note">'
-        f"<p><b>口径无效：{listed}</b> —— {counts} 题抽不出选项字母，记 0 分。"
-        "这是「口径无效」，不是「得分很低」。</p>"
-        "<p>「答案：」在 user 回合内，基座把它当成写完的文档继续往下写；"
-        "指令微调过的模型才会吐字母。这一列量的是格式适配，不是知识水平。</p>"
-        "<p>基座看「MMLU（纯文本）」列；「MMLU（chat）」只在指令微调模型之间比。"
-        "定义见 <code>docs/01-评测.md</code>。</p>"
+        f"<p><b>口径无效：{listed}</b>。{counts} 题未抽出选项字母，按 0 分计。"
+        "该结果表示口径不适用，不代表模型得分低。</p>"
+        "<p>该口径将「答案：」置于 user 回合内，基座按续写文档处理；"
+        "仅指令微调模型会输出选项字母。此项度量格式适配度，不代表知识水平。</p>"
+        "<p>基座以「MMLU（纯文本）」列为准；「MMLU（chat）」仅在指令微调模型之间可比。"
+        "口径定义见 <code>docs/01-评测.md</code>。</p>"
         "</div>"
     )
 
@@ -275,12 +274,12 @@ DIAGNOSTIC_SUITES = (
 # 详见 docs/01-评测.md 的「被截断在两个评测项里是两件事」。
 TRUNCATION_ALARM = 0.20
 TRUNCATION_MEANING = {
-    "gsm8k": ("生成长度给少了",
-              "答案可能被切在最终数值之前，<b>分数被系统性压低</b>；越啰嗦的模型被压得越狠"),
+    "gsm8k": ("生成长度不足",
+              "答案可能被截断在最终数值之前，<b>分数被系统性压低</b>；输出越长的模型受影响越大"),
     "ifollow": ("输出偏长",
-                "多是模型话多（字数类约束会被撑爆），不一定是长度给少了"),
-    "humaneval": ("函数早写完了",
-                  "模型在继续写自己的示例调用/自测；抽取逻辑会在 <code>print(</code> 处截断，"
+                "多为模型输出冗长所致（字数类约束因此超出），并非生成预算不足"),
+    "humaneval": ("函数已完成",
+                  "模型在继续编写示例调用与自测；抽取逻辑在 <code>print(</code> 处截断，"
                   "<b>不影响判分</b>"),
 }
 # 只要吐一个字母的项（上限 8 token），「截断」是常态、没有诊断价值 —— 不提示。
@@ -294,22 +293,22 @@ def suite_notes(key: str, slot: dict) -> list[str]:
     if key.startswith("mmlu"):
         fallback = (slot.get("by_rule") or {}).get("fallback", 0)
         if total and slot.get("unparsed") == total:
-            notes.append("全题解析失败 —— 这个口径对它无效")
+            notes.append("全部题目解析失败，该口径不适用")
         elif fallback:
-            notes.append(f"{fallback}/{total} 题靠兜底抽取（可能抓到题干里的选项标号）")
+            notes.append(f"{fallback}/{total} 题使用兜底抽取（可能命中题干中的选项标号）")
     elif key == "gsm8k":
         follows = slot.get("follows_format")
         if follows is not None:
-            notes.append(f"按「#### 数字」作答 {follows}/{total}")
+            notes.append(f"按指定格式作答 {follows}/{total}")
     elif key == "ifollow":
         bad = slot.get("failed_with_junk_tail")
         if bad:
-            notes.append(f"{bad} 条带乱码尾且未通过")
+            notes.append(f"{bad} 条含乱码尾且未通过")
         # 把「不含乱码会是多少分」摆出来 —— 乱码是模型的真实输出（判分照算），
         # 但它值多少分必须可见，否则 16pp 的差距会被读成能力问题
         raw, trimmed = slot.get("rate"), slot.get("rate_junk_trimmed")
         if raw is not None and trimmed is not None and abs(trimmed - raw) > 1e-6:
-            notes.append(f"去掉尾部乱码后 {trimmed:.1%}（{trimmed - raw:+.1%}）")
+            notes.append(f"去除尾部乱码后 {trimmed:.1%}（{trimmed - raw:+.1%}）")
     return notes
 
 
@@ -331,7 +330,7 @@ def diagnostics_section(results: list[dict]) -> str:
             notes = suite_notes(key, slot)
             alarming = False
             if truncated and total and truncated / total >= TRUNCATION_ALARM:
-                short, why = TRUNCATION_MEANING.get(key, ("截断偏高", "生成长度可能给少了"))
+                short, why = TRUNCATION_MEANING.get(key, ("截断偏高", "生成长度可能不足"))
                 if key not in TRUNCATION_SILENT:
                     notes.append(f"<b>{short} · {truncated / total:.0%}</b>：{why}")
                     # 只有 GSM8K 的截断会真的压低分数，那里才标红；
@@ -343,10 +342,10 @@ def diagnostics_section(results: list[dict]) -> str:
         return ""
 
     parts = ["<h2>可信度诊断</h2>",
-             '<div class="sub">这些数字不参与判分，但它们决定上面那张表能不能信。'
-             "被截断 = 生成用满了 token 上限（<b>含义随评测项不同</b>，见备注）；"
-             "乱码尾 = 回合结束前吐了一个稀有 token（本项目 SFT 模型的已知缺陷，"
-             "base / instruct 没有）。</div>",
+             '<div class="sub">以下指标不参与判分，用于判断上表的可信度。'
+             "被截断：生成用满 token 上限（<b>含义随评测项而异</b>，见备注）。"
+             "乱码尾：回合结束前输出一个稀有 token"
+             "（本项目 SFT 模型的已知缺陷，base 与 instruct 无此现象）。</div>",
              '<div class="card"><table><thead><tr>'
              "<th>模型</th><th>评测项</th><th>样本</th><th>被截断</th><th>乱码尾</th>"
              "<th>备注</th></tr></thead><tbody>"]
@@ -406,7 +405,7 @@ def markdown_table(results: list[dict]) -> str:
         note += f"\n>\n> 题目文件：{'、'.join(fingerprints)}"
     note += "\n>\n> 括号内为 Wilson 95% 置信区间半宽（pp）。"
     if partial:
-        note += f"\n>\n> ⚠ 这轮每项只跑前 {partial} 条，是快速定位用的截断档，不要当最终数字用。"
+        note += f"\n>\n> 本表为截断档（各项仅前 {partial} 条），不作最终结论。"
     return "\n".join(lines) + "\n\n" + note
 
 
@@ -488,14 +487,14 @@ def render(results: list[dict], judges: list[dict]) -> str:
         "<title>tiny-post-train · 模型评测报告</title>",
         f'<style>{CSS}</style></head><body><div class="wrap">',
         "<h1>模型评测报告</h1>",
-        f'<div class="sub">生成于 {time.strftime("%Y-%m-%d %H:%M:%S")}　·　'
-        f"{len(active)} 个模型　·　数据来自 <code>evals/results/</code></div>",
+        f'<div class="sub">生成时间　{time.strftime("%Y-%m-%d %H:%M:%S")}　·　'
+        f"模型数　{len(active)}　·　数据源　<code>evals/results/</code></div>",
         consistency_warning(active),
         engine_warning(active),
     ]
 
     if not active:
-        parts.append('<div class="alert">没有找到完整结果。先跑：'
+        parts.append('<div class="alert">未找到完整结果。请先执行：'
                      "<code>python scripts/eval_pipeline.py --run ...</code></div>")
         return "\n".join(parts) + "</div></body></html>"
 
@@ -504,9 +503,9 @@ def render(results: list[dict], judges: list[dict]) -> str:
     if suites:
         parts.append("<h2>主指标对照</h2>")
         parts.append(
-            '<div class="sub">按 <b>训练顺序</b>排列（base → SFT → DPO），'
-            "一眼能看出每一步的增量；最后一行是官方 <code>instruct-2507</code>，"
-            "<b>作为上限参照，不参与「▲ 领先」标记</b>。</div>"
+            '<div class="sub">按<b>训练顺序</b>排列（base → SFT → DPO），便于逐阶段观察增量。'
+            "末行 <code>instruct-2507</code> 为官方对齐版，作上限参照，"
+            "<b>不参与领先标记</b>。</div>"
         )
         parts.append('<div class="card"><table><thead><tr><th>模型</th>')
         for _key, name, note in suites:
@@ -590,24 +589,24 @@ def render(results: list[dict], judges: list[dict]) -> str:
                 f"<td>{html.escape(str(judge.get('b', {}).get('label')))}</td>"
                 f'<td class="num"><b>{pct(judge.get("b_win_rate"))}</b></td>'
                 f'<td class="num">{pct(low)} ~ {pct(high)}'
-                f'<div class="frac">{"分不出高下" if spans else "有区分度"}</div></td>'
+                f'<div class="frac">{"无区分度" if spans else "有区分度"}</div></td>'
                 f'<td class="num">{counts.get("b", 0)}/{counts.get("a", 0)}/{counts.get("tie", 0)}</td>'
                 f'<td class="num">{counts.get("position_sensitive", 0)}'
                 f'<div class="frac">交换顺序后翻转</div></td>'
                 f"<td class=\"meta\">{html.escape(Path(str(judge.get('judge', ''))).name)}</td></tr>"
             )
         parts.append("</tbody></table></div>")
-        parts.append('<div class="sub">位置敏感率高说明裁判本身不可靠，'
-                     "换顺序就变结论的那些已被剔除，不计入胜率。</div>")
+        parts.append('<div class="sub">位置敏感率偏高表示裁判本身不可靠；'
+                     "交换顺序后结论翻转的样本已剔除，不计入胜率。</div>")
 
     # ---- Markdown
     markdown = markdown_table(results)
     if markdown:
-        parts.append("<h2>README 用 Markdown</h2>")
+        parts.append("<h2>Markdown 表格（供 README 使用）</h2>")
         parts.append(f"<pre>{html.escape(markdown)}</pre>")
 
     # ---- 元信息
-    parts.append("<h2>结果是怎么跑出来的</h2>")
+    parts.append("<h2>运行配置与可复现信息</h2>")
     parts.append('<div class="card"><table><thead><tr>'
                  "<th>模型</th><th>推理引擎</th><th>对话模板</th><th>评测集指纹</th>"
                  "<th>生成长度</th><th>时间</th></tr></thead><tbody>")
@@ -662,10 +661,10 @@ def render(results: list[dict], judges: list[dict]) -> str:
     partial = next((r["_partial"] for r in active if r.get("_partial")), None)
     if partial:
         parts.append(
-            f'<div class="alert"><b>这是截断档</b>'
-            f"<div>每项只跑了前 {partial} 条，用来快速定位「谁强谁弱」。"
-            f"置信区间会明显变宽，<b>不要把这组数字写进 README 当最终结果</b>。"
-            f"出正式结论请去掉 <code>--limit</code> 跑全量。</div></div>"
+            f'<div class="alert"><b>截断档（非最终结果）</b>'
+            f"<div>各项仅评测前 {partial} 条，用于快速判断强弱序。"
+            f"置信区间显著变宽，<b>不适用于最终结论</b>；"
+            f"正式结论须去掉 <code>--limit</code> 跑全量。</div></div>"
         )
 
     parts.append("</div></body></html>")
