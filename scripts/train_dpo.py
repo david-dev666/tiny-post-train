@@ -84,6 +84,10 @@ def parse_args():
     p.add_argument("--num-epochs", type=float, default=1.0)
     p.add_argument("--max-steps", type=int, default=-1)
     p.add_argument("--max-prompt-length", type=int, default=512)
+    p.add_argument("--dataset-num-proc", type=int, default=1,
+                   help="数据集预处理进程数。**默认 1（关多进程）** —— 实测 num_proc=8 时"
+                        "会在「Tokenizing eval dataset」卡死（24 核空转、GPU 0%，"
+                        "同样数据同样参数前一次却正常，是偶发死锁）。单进程慢几十秒但稳")
     p.add_argument("--save-steps", type=int, default=200)
     p.add_argument("--seed", type=int, default=3407)
     p.add_argument("--eval-ratio", type=float, default=0.02)
@@ -286,6 +290,8 @@ def main() -> int:
         max_prompt_length=args.max_prompt_length,
         # ref 就是「当前模型禁用 LoRA」= 合并后的 SFT 模型，见文件头的说明
         precompute_ref_log_probs=False,
+        # 关掉多进程预处理：见过它在 Tokenizing eval dataset 上偶发死锁
+        dataset_num_proc=args.dataset_num_proc,
     )
     if eval_dataset is not None:
         fields = ts._config_fields()
