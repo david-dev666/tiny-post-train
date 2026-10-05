@@ -253,7 +253,8 @@ python scripts/bench_subset.py     # 生成 evals/mmlu-subset.jsonl（57 学科 
 > 已查证**不是 EOS 监督不足**（48000 条样本全带 `<|im_end|>`、0 条超长截断、loss 覆盖 EOS），
 > 详见 `docs/01-评测.md`；训练侧修它的 13 次尝试见上文「收尾乱码尾」一节。
 
-交互式报告见 `evals/results/report.html`（自包含，零外部依赖）；
+交互式报告：**[在线版](https://david-dev666.github.io/tiny-post-train/)**（GitHub Pages）
+· 源码 `docs/index.html`，与 `evals/results/report.html` 是**同一个 `render()` 的产物**（自包含、零外部依赖）；
 **评测怎么跑、怎么读、判分踩过哪些坑，见 [`docs/01-评测.md`](docs/01-评测.md)**。
 
 > 更早那版 **HF 引擎**的结果（只跑了 400 题）存在 `evals/archive/hf-engine/`，**不参与任何对比**。
