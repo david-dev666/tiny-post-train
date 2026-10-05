@@ -43,7 +43,7 @@ v2 的输出在回合结束前会多吐一个乱码 token（希伯来语词 `ל�
 > **一条必须写进验收的判据**：总 `junk_tail` 会被「模型停不下来」刷低 —— v3 和 RFT 第一轮都靠它
 > 制造了「指标变好」的假象。任何 adapter 必须同时报三个数：
 > **用满 token 上限的样本数** / **自然收尾样本里的乱码尾率** / 主指标。
-> 这个坑项目踩了三次（详见 `notes/workflow.md` 的「失败记录」与硬约束）。
+> 这个坑项目踩了三次 —— 上面表里的 v3 和 RFT 第一轮，都是靠「模型停不下来」把 `junk_tail` 刷低的。
 
 ## 实验设计
 
@@ -154,6 +154,31 @@ python scripts/bench_subset.py     # 生成 evals/mmlu-subset.jsonl（57 学科 
 不是抽样，这一点比什么都重要。
 **下表全部由同一个引擎产出（vLLM），只有一把尺子**；换引擎要整批重跑。
 
+### ⚖️ 评测公平性：两条硬规则
+
+> **规则一：评测任何模型，都不允许使用任何推理优化或人为技巧干预。**
+>
+> 禁止：抬高某个 token（如 `<|im_end|>`）的 logits、`logit_bias`、`repetition_penalty` /
+> `presence_penalty` / `frequency_penalty`、`bad_words`、`min_tokens` 之类的长度约束、
+> 以及任何 `logits_processor` 回调或被 hack 过的 chat template。
+>
+> 只允许：`temperature=0` 贪心解码、`top_p=1.0`、`max_tokens`、`stop_token_ids`、
+> `skip_special_tokens`。（`max_tokens` 是预算不是技巧，但**必须一视同仁并公开** ——
+> 见规则二。）
+>
+> **为什么**：任何解码干预都会把「模型会不会」和「我们让不让它」搅在一起，跨模型对比随即失去意义。
+> 本项目吃过这个亏 —— 把 `<|im_end|>` 的 logit 抬高 +2.0，指令遵循能从 61.0% 做到 **80.5%**、
+> 乱码尾能做到 **0**，但那是**解码技巧**，模型本身一点没变。所以那批实验（`sft-boost` /
+> `probe-boost`）已经从结果目录移进 `evals/archive/`，**不参与任何对比**；补丁代码也已删除，
+> `scripts/` 里 grep 不到任何 `logits_processor` / `logit_bias` / penalty 参数。
+>
+> **规则二：所有参与对比的模型，必须在同一判分栈上重跑过，并且必须公开截断数。**
+>
+> 判据代码一改，历史数字就不能并列（本项目实测：同一模型换判分栈后 GSM8K 挪动 1.2pp，
+> 已 ≥ 重跑抖动 0.5pp）。同时**必须同时报「用满 token 上限的样本数」** ——
+> 「写不完」会被误读成「不会」（GSM8K 256-token 那个假结论就是这么来的，
+> HumanEval 上 `sft-4b-v2` 有 57/164 条被截断，直接让代码分数虚低 11pp）。
+
 | 模型 | MMLU（chat） | MMLU（纯文本） | 指令遵循 | 指令遵循（去尾） | GSM8K（数学） | HumanEval（代码） |
 | --- | --- | --- | --- | --- | --- | --- |
 | `base-4b`　Qwen3-4B-Base（基线） | 0.0% ±0.03 | 69.5% ±0.76 | 39.5% ±6.72 | 39.5% | 68.0% ±2.52 | 67.7% ±7.09 |
@@ -216,7 +241,7 @@ python scripts/bench_subset.py     # 生成 evals/mmlu-subset.jsonl（57 学科 
 > **旧 DPO 5 轮全否 ≠ 「DPO 不行」。** 那 5 轮的数据是为「修收尾那一个 token」手工构造的定向数据
 > （chosen/rejected 只差最后 1 个 token），目的是错的、数据也不是通用偏好数据。
 > 换成开源、被广泛复用、且**不是自己采样**的偏好数据后，第一个 epoch 就出了上面的结果。
-> 详见 `notes/workflow.md`。
+> 数据转换脚本见 `scripts/make_dpo_open_data.py`（含长度偏置过滤），逐轮失败与根因见上面的表。
 
 > **指令遵循的 61.0% 是保守值，SFT 的真实水平是 75.0%（去尾口径）。**
 > 它每次回合结束前会吐**一个**罕见 token（希伯来语词 `לחלוט`，或字节残缺的
@@ -226,7 +251,7 @@ python scripts/bench_subset.py     # 生成 evals/mmlu-subset.jsonl（57 学科 
 > 有 93.4%（指令遵循）/ 93.0%（GSM8K）/ 92.5%（OpenQA）带它，
 > 而 `base-4b` 是 0~2.5%、`instruct-2507` 是 **0.0%**。
 > 已查证**不是 EOS 监督不足**（48000 条样本全带 `<|im_end|>`、0 条超长截断、loss 覆盖 EOS），
-> 详见 `docs/01-评测.md`；修法见 `notes/workflow.md` 的「DPO」一节。
+> 详见 `docs/01-评测.md`；训练侧修它的 13 次尝试见上文「收尾乱码尾」一节。
 
 交互式报告见 `evals/results/report.html`（自包含，零外部依赖）；
 **评测怎么跑、怎么读、判分踩过哪些坑，见 [`docs/01-评测.md`](docs/01-评测.md)**。
