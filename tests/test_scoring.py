@@ -153,7 +153,7 @@ class _FakeTokenizer:
 
 _tok = _FakeTokenizer(
     {0: "你好", 1: "，世界", 2: " לחלוט", 3: " ", 4: "��取", 5: "。", 6: " פייסב",
-     7: "<|endoftext|>"},
+     7: "<|endoftext|>", 8: "togroup"},
     special=(7,),
 )
 
@@ -169,6 +169,12 @@ case("token 层：只有尾空白不剪", trailing_junk_len(_tok, [0, 1, 5, 3]),
 # 连续两个乱码 token 都要剪掉，但 max_scan 兜住「整段都是乱码」的极端情况
 case("token 层：连续两个乱码", trailing_junk_len(_tok, [0, 1, 2, 6]), 2)
 case("token 层：max_scan 上限", trailing_junk_len(_tok, [2, 6, 2, 6, 2, 6], max_scan=4), 4)
+# 🔴 第五次漏检的回归：乱码后面还粘着一个**拉丁串**（实测 `...研究。 לחלוטtogroup`）。
+# 旧的「往回吃连续乱码」会撞上 `togroup`（不算乱码）当场判 0，
+# 于是 177/200 的乱码率被报成 0/200 —— 整轮结论因此翻车过一次。
+case("token 层：乱码后面粘着拉丁串", trailing_junk_len(_tok, [0, 1, 2, 8]), 2)
+# 反过来：末尾只有正常英文，没有乱码 → 一个都不剪
+case("token 层：末尾正常英文不误剪", trailing_junk_len(_tok, [0, 1, 8]), 0)
 case("token 层：空序列", trailing_junk_len(_tok, []), 0)
 case("token 层：全是空白", trailing_junk_len(_tok, [3, 3]), 0)
 

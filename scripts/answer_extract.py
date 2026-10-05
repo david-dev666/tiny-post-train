@@ -158,6 +158,14 @@ def mmlu_letter(text: str, letters: str = "ABCD") -> tuple[int | None, str]:
 #    实测以希伯来语词 `לחלוט` 为主。已核验评测集（200+1319+40 条）的题面与
 #    规则里**没有任何一条合法要求这些文字的输出**，所以当作乱码不会误报。
 #
+#    ⚠️ 这份清单**漏过两次**，每次都是"指标看着好好的、其实没量到"：
+#    - 第一次：漏 U+FFFD（见下面第 2 条）
+#    - 第二次：漏**兼容区**。实测模型会吐 `離`（U+F9AA，CJK 兼容表意文字区）——
+#      它和标准谚文区 `\uAC00-\uD7AF` 不是一回事，于是 RFT 筛选把它判成"干净样本"
+#      选进了训练集（1932 条里混进 1 条）。**这类字符只可能是模型的异常输出**：
+#      正常中文不会用兼容区，语料里也见不到，所以归到乱码不会误报。
+#    维护这份清单时的判据：**"评测集里没有任何一条**合法要求**它"→ 可以列入。**
+#
 # 2. **U+FFFD 替换字符**。原先漏的就是这一类，导致乱码尾被系统性低估
 #    （GSM8K 实报 65.3%，真实 92.3%；指令遵循实报 75.5%，真实 84.5%）。
 #    成因是字节级 BPE：某个 token 的原始字节形如 `A0 A1 E5 8F 96`，
@@ -171,7 +179,11 @@ _OTHER_SCRIPT_CLASS = (
     r"\u0600-\u06FF"      # 阿拉伯
     r"\u0E00-\u0E7F"      # 泰文
     r"\uAC00-\uD7AF"      # 谚文
+    r"\u3130-\u318F"      # 谚文兼容字母
     r"\u3040-\u30FF"      # 平假名 / 片假名
+    r"\uE000-\uF8FF"      # 私用区（模型异常时常见）
+    r"\uF900-\uFAFF"      # CJK 兼容表意文字（实测会吐 離 U+F9AA）
+    r"\uFB00-\uFB4F"      # 拉丁连字
 )
 OTHER_SCRIPT_RE = re.compile("[" + _OTHER_SCRIPT_CLASS + "]")
 # 乱码字符全集：其它文字系统 + 替换字符
@@ -191,14 +203,32 @@ def is_junk_piece(piece: str) -> bool:
     return bool(JUNK_CHAR_RE.search(piece or ""))
 
 
-def trailing_junk_len(tokenizer, ids, max_scan: int = 4) -> int:
+def trailing_junk_len(tokenizer, ids, max_scan: int = 16) -> int:
     """末尾该剪掉几个 token。0 = 干净收尾。
 
     **这是乱码尾的唯一可靠判据** —— 文本层判不了，原因见上面 U+FFFD 那段：
     `��取` 解码后以正常汉字收尾，正则剪不掉它。造 DPO 的停止决策偏好数据
     也靠这个函数，所以**评测口径和训练靶心是同一个定义**，不会各量各的。
 
-    `max_scan` 防止某天吐出一长串乱码时把答案正文也一起吃掉。
+    ⚠️ **第五次修正**（这条判据一共被推翻过五次，每次的失效方式都一样：
+    不报错，只是静默地把结论指错）：
+
+        ① 漏 U+FFFD               → 乱码率被系统性低估
+        ② 漏兼容区字符             → 脏样本被当成干净样本喂进训练集
+        ③ 漏 `<|fim_middle|>` 这类标记 token
+        ④ 漏纯 ASCII 乱码（`NdrFc`）
+        ⑤ 漏「乱码后面还跟着拉丁串」 ← 本次
+
+    ⑤ 的具体样子：`...值得我们去探索和研究。 לחלוטtogroup`。旧实现「从尾巴
+    往回吃**连续**乱码 token」，而最后那个 token 是 `togroup`（拉丁字母，不算乱码）
+    → 直接判 0 → **整个乱码尾被漏掉**（实测把 177/200 的乱码率报成了 0/200）。
+
+    新实现：在末尾 `max_scan` 个 token 里找**最早的那个乱码 token**，
+    **它到末尾之间的内容全部算脏**（包括夹在后面的拉丁串、空白）。
+    只吃"连续乱码"是不够的 —— 乱码后面粘着什么，一样是脏。
+
+    取"最早"而不是"最后一个"：连续两个乱码时**两个都要剪掉**
+    （回归测试 `[0, 1, 乱码, 乱码] → 2` 守着这条）。
 
     ⚠️ 结果依赖 tokenizer 的切法（同一个字符可能被切成不同数量的 token），
     所以只在同一个 tokenizer 内部可比。
@@ -207,29 +237,22 @@ def trailing_junk_len(tokenizer, ids, max_scan: int = 4) -> int:
     total = len(ids)
 
     def piece(index: int) -> str:
-        # skip_special_tokens=True 有两层用处，都不能省：
-        #  1) 兜住「ids 里还带着停止符」的情况。vLLM 的 token_ids 是带的
-        #     （已在 engines.strip_stop_tokens 里裁掉，但不保证每个调用方都裁过）——
-        #     不跳过它就等于把停止符当成「最后那个 token」，永远判不出乱码
+        # skip_special_tokens=True 的两层用处：
+        #  1) 兜住「ids 里还带着停止符」的情况（vLLM 的 token_ids 是带的，
+        #     已在 engines.strip_stop_tokens 里裁掉，但不保证每个调用方都裁过）
         #  2) 尾部的换行 / 空格要跟着乱码一起剪掉
         return tokenizer.decode([ids[index]], skip_special_tokens=True)
 
-    # 1) 从尾部跳过纯空白，定位最后一个「有内容」的 token
-    last = total - 1
-    while last >= 0 and not piece(last).strip():
-        last -= 1
-    if last < 0:
-        return 0
-
-    # 2) 从它往回吃掉连续的乱码 token
-    index = last
-    eaten = 0
-    while index >= 0 and eaten < max_scan and is_junk_piece(piece(index)):
-        eaten += 1
-        index -= 1
-
-    # 3) 没乱码就不动；有乱码则「乱码 + 它后面的空白」一起剪
-    return 0 if eaten == 0 else total - index - 1
+    # 在末尾窗口里**从左往右**找第一个乱码：它到末尾之间的内容全算脏。
+    #
+    # 从左而不是从右，是因为「连续两个乱码」时两个都要剪；而本次修的
+    # `לחלוטtogroup` 场景，找到最早那个乱码后，后面的拉丁串也会被一起剪掉。
+    # 方向只在「窗口内有多处乱码、且中间夹着正常内容」时才有区别，
+    # 而这种输出本来就已经坏了，整段剪掉是合理的。
+    for index in range(max(0, total - max_scan), total):
+        if is_junk_piece(piece(index)):
+            return total - index
+    return 0
 
 
 def trim_junk_tail(text: str) -> str:
