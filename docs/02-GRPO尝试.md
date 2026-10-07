@@ -7,6 +7,10 @@
 
 > 数据来源：服务器实测（`outputs/grpo-4b-ifrlvr`）。评测产物未入库
 > （`evals/results/*.json` 不进版本库），本文只保留结论与归因。
+>
+> 环境：单卡 **RTX 5090 32G**（2026-10-06 换机后；上面主表那批结果出自 4090 24G）。
+> 训练跑在 `vllm` 环境（trl 1.14.1 + vllm 0.30 + transformers 5.18，colocate 模式），
+> 原因（`tpt` 的 trl 0.24 与 transformers 5 不适配、server 模式需要 TRL 私有路由）见 `notes/workflow.md`。
 
 ## 一、主因：奖励形式打不到主指标真正的缺口（结构性，能确定）
 

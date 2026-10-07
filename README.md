@@ -2,6 +2,8 @@
 
 Qwen3-4B 的后训练全流程开源项目：SFT -> DPO -> GRPO -> 评测 -> 部署。
 
+> **在线评测报告（GitHub Pages）**：<https://david-dev666.github.io/tiny-post-train/>
+
 ## 目标
 
 在单卡 24G 显存上，用一套可复现的脚本跑通小模型后训练的完整链路，并给出真实评测对比，而不是只贴一个 loss 曲线。
