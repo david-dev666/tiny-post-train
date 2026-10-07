@@ -176,7 +176,7 @@ def _run_from_cmdline(procs: list[str]) -> str | None:
 # ⚠️ 加新训练脚本时**必须补进来**。原来这里只写死了 `train_sft.py`，
 # 于是 DPO 训练（`train_dpo.py`）跑着的时候看板报 `alive: false` ——
 # 曲线在动、GPU 在转，看板却说「没运行」，很容易让人以为任务挂了。
-TRAINER_SCRIPTS = ("train_sft.py", "train_dpo.py")
+TRAINER_SCRIPTS = ("train_sft.py", "train_dpo.py", "train_grpo.py")
 
 
 def _trainer_processes() -> dict:
