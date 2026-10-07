@@ -10,12 +10,11 @@
 | 许可证 | Apache-2.0（见同目录 `LICENSE`） |
 | 论文 | *Generalizing Verifiable Instruction Following*，arXiv 2507.02833（NeurIPS 2025） |
 
-## 为什么放在 `scripts/` 而不是 `third_party/`
+## 放置位置
 
-项目的 rsync 白名单只同步 `scripts/ configs/ docs/ dashboard/ tests/`（`data/`、`evals/`、`outputs/`、`weights/` 都被排除）。
-判分器与测试集必须能上服务器，所以放在 `scripts/ifbench/`。
+项目的代码同步采用黑名单式 rsync（排除 `weights/`、`data/`、`outputs/`、`logs/` 等目录）。判分器与测试集必须能够同步至服务器，因此放在 `scripts/ifbench/`。
 
-## 复制了哪些文件
+## 复制的文件
 
 | 文件 | 用途 |
 | --- | --- |
@@ -26,8 +25,7 @@
 | `__init__.py` | 包入口，含 `data_path()` |
 | `data/IFBench_test.jsonl` | **泛化验证集**，299 条 held-out prompt（58 个全新约束） |
 
-上游的 `run_eval.py` / `generate_responses.py` / `config.py`（需要 API key 的评测 CLI）**没有复制**，
-本项目只复用判分逻辑，自己写 `eval_ifbench.py` 接入既有评测栈。
+上游的 `run_eval.py` / `generate_responses.py` / `config.py`（需要 API key 的评测 CLI）未复制。本项目仅复用判分逻辑，另需实现 `eval_ifbench.py` 接入既有评测栈（该脚本尚未实现）。
 
 ## 改动记录
 
@@ -36,4 +34,5 @@
 ## 依赖
 
 上游 `requirements.txt`：`absl-py langdetect nltk immutabledict spacy emoji syllapy>=0.8.0`。
-实际判分路径需要哪些以 `scripts/ifbench_smoke.py` 实测为准。
+
+本项目实际判分路径的依赖为 `absl-py emoji immutabledict langdetect nltk syllapy`（由源码 import 实测得出，未使用 spacy），已列入根目录 `requirements.txt`。
