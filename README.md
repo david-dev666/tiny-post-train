@@ -25,7 +25,7 @@ Qwen3-4B 的后训练全流程开源项目：SFT -> DPO -> GRPO -> 评测 -> 部
 | 2 | DPO 偏好对齐 | scripts/train_dpo.py | 已跑通（数据改用**开源** UltraFeedback 中文偏好集；此前「修收尾」那套用途 5 轮证否，见下） |
 | 3 | GRPO 可验证奖励强化 | scripts/train_grpo.py | 已尝试，未成功（0.0pp、**无正式结果**；[归因与边界](docs/02-GRPO尝试.md)） |
 | 4 | 评测 | scripts/eval.py | 可用（5 套评测 + 置信区间 + 可切换推理引擎） |
-| 5 | 推理部署 | scripts/serve_vllm.sh | 未实现（评测侧的 vLLM 已跑通，见 scripts/engines.py） |
+| 5 | 推理部署 | scripts/serve_vllm.sh | **未做**（本次时间未及；评测侧的 vLLM 已跑通，见 scripts/engines.py） |
 | 辅助 | 训练看板 | dashboard/server.py | 可用 |
 | 辅助 | 多模型评测 pipeline | scripts/eval_pipeline.py | 可用（跑完自动出 HTML 报告） |
 | 辅助 | 评测报告 | scripts/make_report.py | 可用（自包含 HTML，零外部依赖） |

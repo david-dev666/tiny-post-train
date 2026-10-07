@@ -16,6 +16,18 @@ huggingface_hub
 # 评测
 lm-eval
 
+# GRPO 训练与 IFBench 判分（仅阶段 3 用，不跑 GRPO 可以不装）
+# 列表从 vendor 判分器的源码 import 实测得出（scripts/ifbench/ + scripts/open_instruct/IFEvalG/），
+# 上游 allenai/IFBench 的 requirements.txt 里还列了 spacy，但判分路径并没有 import 它。
+# nltk 的语言数据（punkt / punkt_tab / stopwords / averaged_perceptron_tagger_eng）
+# 由判分器首次运行时自动 `nltk.download(...)`，需要网络，不必手工准备。
+absl-py
+emoji
+immutabledict
+langdetect
+nltk
+syllapy
+
 # 训练看板
 tensorboard
 fastapi
